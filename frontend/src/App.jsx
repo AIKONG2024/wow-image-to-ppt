@@ -33,6 +33,7 @@ export function App() {
   const [splitMode, setSplitMode] = useState(false);
   const [splitBoxes, setSplitBoxes] = useState([]);
   const [draftBox, setDraftBox] = useState(null);
+  const [viewMode, setViewMode] = useState('overlay');
   const stageRef = useRef(null);
 
   useEffect(() => {
@@ -42,6 +43,10 @@ export function App() {
   const visibleComponents = useMemo(
     () => (project?.components ?? []).filter((component) => !component.hidden),
     [project],
+  );
+  const inspectionComponents = useMemo(
+    () => [...visibleComponents].sort(componentInspectionOrder),
+    [visibleComponents],
   );
 
   const selectedComponents = useMemo(
@@ -251,42 +256,103 @@ export function App() {
             </div>
           )}
           {project && (
-            <div className="stageWrap">
-              <div
-                className={`stage ${splitMode ? 'splitMode' : ''}`}
-                ref={stageRef}
-                onPointerDown={onStagePointerDown}
-                onPointerMove={onStagePointerMove}
-                onPointerUp={onStagePointerUp}
-              >
-                <img src={imageUrl} alt="uploaded slide" draggable={false} />
-                {visibleComponents.map((component) => (
+            <div className="canvasStack">
+              <div className="viewToolbar">
+                <div className="segmented" role="group" aria-label="component view mode">
                   <button
-                    key={component.id}
                     type="button"
-                    className={`overlay ${component.type} ${
-                      selected.includes(component.id) ? 'selected' : ''
-                    }`}
-                    style={boxStyle(component.bbox, project)}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      toggleSelect(component.id);
-                    }}
-                    title={`${typeLabels[component.type] ?? component.type} · ${component.source}`}
+                    className={viewMode === 'overlay' ? 'active' : ''}
+                    onClick={() => setViewMode('overlay')}
                   >
-                    <span>{typeLabels[component.type] ?? component.type}</span>
+                    Overlay
                   </button>
-                ))}
-                {splitBoxes.map((box, index) => (
-                  <div className="splitBox" style={boxStyle(box, project)} key={`${box.x}-${index}`} />
-                ))}
-                {draftBox && <div className="splitBox draft" style={boxStyle(draftBox, project)} />}
+                  <button
+                    type="button"
+                    className={viewMode === 'exploded' ? 'active' : ''}
+                    onClick={() => setViewMode('exploded')}
+                  >
+                    Exploded
+                  </button>
+                </div>
+                <span className="viewCount">{inspectionComponents.length} components</span>
               </div>
+
+              {viewMode === 'overlay' ? (
+                <div className="stageWrap">
+                  <div
+                    className={`stage ${splitMode ? 'splitMode' : ''}`}
+                    ref={stageRef}
+                    onPointerDown={onStagePointerDown}
+                    onPointerMove={onStagePointerMove}
+                    onPointerUp={onStagePointerUp}
+                  >
+                    <img src={imageUrl} alt="uploaded slide" draggable={false} />
+                    {visibleComponents.map((component) => (
+                      <button
+                        key={component.id}
+                        type="button"
+                        className={`overlay ${component.type} ${
+                          selected.includes(component.id) ? 'selected' : ''
+                        }`}
+                        style={boxStyle(component.bbox, project)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleSelect(component.id);
+                        }}
+                        title={`${typeLabels[component.type] ?? component.type} · ${component.source}`}
+                      >
+                        <span>{typeLabels[component.type] ?? component.type}</span>
+                      </button>
+                    ))}
+                    {splitBoxes.map((box, index) => (
+                      <div className="splitBox" style={boxStyle(box, project)} key={`${box.x}-${index}`} />
+                    ))}
+                    {draftBox && <div className="splitBox draft" style={boxStyle(draftBox, project)} />}
+                  </div>
+                </div>
+              ) : (
+                <div className="explodedGrid">
+                  {inspectionComponents.map((component) => (
+                    <ComponentCard
+                      key={component.id}
+                      component={component}
+                      project={project}
+                      selected={selected.includes(component.id)}
+                      imageUrl={imageUrl}
+                      onSelect={toggleSelect}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </section>
       </section>
     </main>
+  );
+}
+
+function ComponentCard({ component, project, selected, imageUrl, onSelect }) {
+  const label = typeLabels[component.type] ?? component.type;
+  return (
+    <button
+      type="button"
+      className={`componentCard ${component.type} ${selected ? 'selected' : ''}`}
+      onClick={() => onSelect(component.id)}
+      title={`${label} · ${component.source} · ${component.id}`}
+    >
+      <div className="cropViewport" style={componentCropFrameStyle(component)}>
+        <img src={imageUrl} alt="" draggable={false} style={componentCropImageStyle(component, project)} />
+      </div>
+      <div className="cardMeta">
+        <div className="cardTitle">
+          <span className={`typePill ${component.type}`}>{label}</span>
+          <small>{component.id.slice(-6)}</small>
+        </div>
+        <span className="sourceText">{component.source}</span>
+        <span className="bboxText">{bboxLabel(component.bbox)}</span>
+      </div>
+    </button>
   );
 }
 
@@ -330,6 +396,52 @@ function boxStyle(bbox, project) {
     width: `${(bbox.width / project.width) * 100}%`,
     height: `${(bbox.height / project.height) * 100}%`,
   };
+}
+
+function componentCropFrameStyle(component) {
+  const ratio = clamp(component.bbox.width / Math.max(component.bbox.height, 1), 0.65, 2.4);
+  return { aspectRatio: `${ratio}` };
+}
+
+function componentCropImageStyle(component, project) {
+  const width = Math.max(component.bbox.width, 1);
+  const height = Math.max(component.bbox.height, 1);
+  return {
+    position: 'absolute',
+    left: `${-(component.bbox.x / width) * 100}%`,
+    top: `${-(component.bbox.y / height) * 100}%`,
+    width: `${(project.width / width) * 100}%`,
+    height: `${(project.height / height) * 100}%`,
+    maxWidth: 'none',
+  };
+}
+
+function bboxLabel(bbox) {
+  return `${Math.round(bbox.x)}, ${Math.round(bbox.y)} · ${Math.round(bbox.width)}×${Math.round(bbox.height)}`;
+}
+
+function componentInspectionOrder(left, right) {
+  const yDelta = left.bbox.y - right.bbox.y;
+  if (Math.abs(yDelta) > 8) return yDelta;
+  const xDelta = left.bbox.x - right.bbox.x;
+  if (Math.abs(xDelta) > 8) return xDelta;
+  return componentZIndex(left) - componentZIndex(right);
+}
+
+function componentZIndex(component) {
+  const layer = {
+    shape: 10,
+    image: 25,
+    chart: 30,
+    table: 30,
+    diagram: 35,
+    unknown: 40,
+    line: 50,
+    arrow: 55,
+    icon: 65,
+    text: 75,
+  }[component.type] ?? 40;
+  return component.source?.startsWith('synthetic-') ? layer - 2 : layer;
 }
 
 function clamp(value, min, max) {

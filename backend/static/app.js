@@ -36,6 +36,7 @@ function App() {
   const [splitBoxes, setSplitBoxes] = useState([]);
   const [draft, setDraft] = useState(null);
   const [selectionDraft, setSelectionDraft] = useState(null);
+  const [viewMode, setViewMode] = useState('overlay');
   const stageRef = useRef(null);
   const suppressClickRef = useRef(false);
 
@@ -45,6 +46,7 @@ function App() {
 
   const visible = useMemo(() => (project?.components ?? []).filter((item) => !item.hidden), [project]);
   const orderedVisible = useMemo(() => [...visible].sort(componentDrawOrder), [visible]);
+  const inspectionVisible = useMemo(() => [...visible].sort(componentInspectionOrder), [visible]);
 
   async function busyRun(callback) {
     setBusy(true);
@@ -256,7 +258,25 @@ function App() {
         )),
       ]),
       h('section', { className: 'canvasPane', key: 'canvas' }, project
-        ? h('div', { className: 'stageWrap' }, h('div', {
+        ? h('div', { className: 'canvasStack' }, [
+          h('div', { className: 'viewToolbar', key: 'toolbar' }, [
+            h('div', { className: 'segmented', role: 'group', 'aria-label': 'component view mode', key: 'modes' }, [
+              h('button', {
+                key: 'overlay',
+                type: 'button',
+                className: viewMode === 'overlay' ? 'active' : '',
+                onClick: () => setViewMode('overlay'),
+              }, 'Overlay'),
+              h('button', {
+                key: 'exploded',
+                type: 'button',
+                className: viewMode === 'exploded' ? 'active' : '',
+                onClick: () => setViewMode('exploded'),
+              }, 'Exploded'),
+            ]),
+            h('span', { className: 'viewCount', key: 'count' }, `${inspectionVisible.length} components`),
+          ]),
+          viewMode === 'overlay' ? h('div', { className: 'stageWrap', key: 'overlay-view' }, h('div', {
             className: `stage ${splitMode ? 'splitMode' : ''} ${selectionDraft ? 'selecting' : ''}`,
             ref: stageRef,
             onPointerDown: down,
@@ -283,12 +303,43 @@ function App() {
             ...splitBoxes.map((box, index) => h('div', { key: `split-${index}`, className: 'splitBox', style: boxStyle(box, project) })),
             draft ? h('div', { key: 'draft', className: 'splitBox draft', style: boxStyle(draft, project) }) : null,
             selectionDraft ? h('div', { key: 'selection', className: 'selectionBox', style: boxStyle(selectionDraft, project) }) : null,
-          ]))
+          ])) : h('div', { className: 'explodedGrid', key: 'exploded-view' }, inspectionVisible.map((component) =>
+            componentCard(component, project, selected.includes(component.id), toggle),
+          )),
+        ])
         : h('div', { className: 'emptyState' }, [
             h(Layers, { size: 42, key: 'icon' }),
             h('strong', { key: 'strong' }, '이미지를 업로드하세요'),
             h('span', { key: 'span' }, '분석 후 컴포넌트를 병합, 분리, 제외할 수 있습니다.'),
           ])),
+    ]),
+  ]);
+}
+
+function componentCard(component, project, selected, onSelect) {
+  const label = labels[component.type] ?? component.type;
+  return h('button', {
+    key: component.id,
+    type: 'button',
+    className: `componentCard ${component.type} ${selected ? 'selected' : ''}`,
+    onClick: () => onSelect(component.id),
+    title: `${label} · ${component.source} · ${component.id}`,
+  }, [
+    h('div', { className: 'cropViewport', style: componentCropFrameStyle(component), key: 'crop' },
+      h('img', {
+        src: `/api/projects/${project.id}/image`,
+        alt: '',
+        draggable: false,
+        style: componentCropImageStyle(component, project),
+      }),
+    ),
+    h('div', { className: 'cardMeta', key: 'meta' }, [
+      h('div', { className: 'cardTitle', key: 'title' }, [
+        h('span', { className: `typePill ${component.type}`, key: 'type' }, label),
+        h('small', { key: 'id' }, component.id.slice(-6)),
+      ]),
+      h('span', { className: 'sourceText', key: 'source' }, component.source),
+      h('span', { className: 'bboxText', key: 'bbox' }, bboxLabel(component.bbox)),
     ]),
   ]);
 }
@@ -315,6 +366,28 @@ function boxStyle(bbox, project) {
   };
 }
 
+function componentCropFrameStyle(component) {
+  const ratio = clamp(component.bbox.width / Math.max(component.bbox.height, 1), 0.65, 2.4);
+  return { aspectRatio: `${ratio}` };
+}
+
+function componentCropImageStyle(component, project) {
+  const width = Math.max(component.bbox.width, 1);
+  const height = Math.max(component.bbox.height, 1);
+  return {
+    position: 'absolute',
+    left: `${-(component.bbox.x / width) * 100}%`,
+    top: `${-(component.bbox.y / height) * 100}%`,
+    width: `${(project.width / width) * 100}%`,
+    height: `${(project.height / height) * 100}%`,
+    maxWidth: 'none',
+  };
+}
+
+function bboxLabel(bbox) {
+  return `${Math.round(bbox.x)}, ${Math.round(bbox.y)} · ${Math.round(bbox.width)}×${Math.round(bbox.height)}`;
+}
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
@@ -332,6 +405,14 @@ function componentDrawOrder(left, right) {
   const zDelta = componentZIndex(left) - componentZIndex(right);
   if (zDelta !== 0) return zDelta;
   return componentArea(right) - componentArea(left);
+}
+
+function componentInspectionOrder(left, right) {
+  const yDelta = left.bbox.y - right.bbox.y;
+  if (Math.abs(yDelta) > 8) return yDelta;
+  const xDelta = left.bbox.x - right.bbox.x;
+  if (Math.abs(xDelta) > 8) return xDelta;
+  return componentZIndex(left) - componentZIndex(right);
 }
 
 function componentZIndex(component) {
