@@ -78,7 +78,7 @@ def test_scene_graph_marks_header_picture_text_regions_for_erasing(tmp_path):
     assert embedded.getpixel((40, 10))[:3] != (0, 0, 0)
 
 
-def test_scene_graph_does_not_erase_text_inside_chart_pictures(tmp_path):
+def test_scene_graph_erases_editable_text_from_chart_pictures(tmp_path):
     image_path = tmp_path / "chart.png"
     image = Image.new("RGB", (200, 120), "white")
     draw = ImageDraw.Draw(image)
@@ -101,7 +101,7 @@ def test_scene_graph_does_not_erase_text_inside_chart_pictures(tmp_path):
 
     image_node = next(node for node in scene.nodes if node.kind == "image")
     assert image_node.source_component_type == "chart"
-    assert image_node.erase_boxes == []
+    assert image_node.erase_boxes == [BBox(x=50, y=36, width=70, height=12)]
 
 
 def test_scene_graph_does_not_erase_text_that_only_slightly_overlaps_large_image(tmp_path):
@@ -131,7 +131,7 @@ def test_scene_graph_does_not_erase_text_that_only_slightly_overlaps_large_image
     assert text_node.bbox.x + text_node.bbox.width <= image_node.bbox.x
 
 
-def test_scene_graph_keeps_text_inside_large_illustration_as_part_of_image(tmp_path):
+def test_scene_graph_erases_editable_text_inside_large_illustration(tmp_path):
     image_path = tmp_path / "illustration.png"
     image = Image.new("RGB", (300, 160), "white")
     draw = ImageDraw.Draw(image)
@@ -152,11 +152,40 @@ def test_scene_graph_keeps_text_inside_large_illustration_as_part_of_image(tmp_p
     with Image.open(image_path).convert("RGBA") as source:
         scene = build_scene_graph(project, source)
 
-    assert [node.kind for node in scene.nodes] == ["image"]
-    assert scene.nodes[0].erase_boxes == []
+    image_node = next(node for node in scene.nodes if node.kind == "image")
+    text_node = next(node for node in scene.nodes if node.kind == "text")
+    assert text_node.text == "BAM"
+    assert image_node.erase_boxes == [BBox(x=190, y=104, width=86, height=30)]
 
 
-def test_scene_graph_preserves_complex_shape_region_as_image_backplate(tmp_path):
+def test_scene_graph_keeps_huge_stylized_image_text_as_artwork(tmp_path):
+    image_path = tmp_path / "huge-stylized-text.png"
+    image = Image.new("RGB", (300, 160), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([120, 0, 300, 160], fill="#d71920")
+    draw.rectangle([140, 76, 292, 154], fill="white")
+    image.save(image_path)
+    project = Project(
+        id="huge-stylized-text",
+        image_path=str(image_path),
+        width=300,
+        height=160,
+        components=[
+            Component(id="art", type="image", bbox=BBox(x=120, y=0, width=180, height=160), source="sam3"),
+            Component(id="text", type="text", bbox=BBox(x=140, y=76, width=152, height=78), text="BAM", source="paddleocr"),
+        ],
+    )
+
+    with Image.open(image_path).convert("RGBA") as source:
+        scene = build_scene_graph(project, source)
+
+    image_node = next(node for node in scene.nodes if node.kind == "image")
+    text_node = next(node for node in scene.nodes if node.kind == "text")
+    assert text_node.text == "BAM"
+    assert image_node.erase_boxes == []
+
+
+def test_scene_graph_keeps_complex_region_text_editable(tmp_path):
     image_path = tmp_path / "complex-banner.png"
     image = Image.new("RGB", (420, 140), "white")
     draw = ImageDraw.Draw(image)
@@ -181,13 +210,16 @@ def test_scene_graph_preserves_complex_shape_region_as_image_backplate(tmp_path)
         scene = build_scene_graph(project, source)
         svg = render_scene_svg(scene, source)
 
-    assert [node.kind for node in scene.nodes] == ["image"]
+    text_nodes = [node for node in scene.nodes if node.kind == "text" and node.text != "•"]
+    image_nodes = [node for node in scene.nodes if node.kind == "image"]
+    assert [node.text for node in text_nodes] == ["KEY TAKEAWAY", "Editable summary"]
+    assert image_nodes
     embedded = _first_embedded_png(svg)
     assert embedded.getpixel((40, 10))[:3] == (215, 25, 32)
-    assert embedded.getpixel((190, 28))[:3] == (0, 0, 0)
+    assert embedded.getpixel((166, 20))[:3] != (0, 0, 0)
 
 
-def test_scene_graph_preserves_dense_icon_text_list_as_one_image_panel(tmp_path):
+def test_scene_graph_keeps_dense_icon_text_list_editable(tmp_path):
     image_path = tmp_path / "dense-list.png"
     image = Image.new("RGB", (520, 420), "white")
     draw = ImageDraw.Draw(image)
@@ -213,12 +245,12 @@ def test_scene_graph_preserves_dense_icon_text_list_as_one_image_panel(tmp_path)
     with Image.open(image_path).convert("RGBA") as source:
         scene = build_scene_graph(project, source)
 
-    assert len(scene.nodes) == 1
-    assert scene.nodes[0].kind == "image"
-    assert scene.nodes[0].bbox.x <= 28
-    assert scene.nodes[0].bbox.y <= 60
-    assert scene.nodes[0].bbox.x + scene.nodes[0].bbox.width >= 398
-    assert scene.nodes[0].bbox.y + scene.nodes[0].bbox.height >= 328
+    text_nodes = [node for node in scene.nodes if node.kind == "text"]
+    image_nodes = [node for node in scene.nodes if node.kind == "image"]
+    rect_nodes = [node for node in scene.nodes if node.kind == "rect"]
+    assert [node.text for node in text_nodes] == ["ITEM 1", "ITEM 2", "ITEM 3", "ITEM 4"]
+    assert len(image_nodes) == 4
+    assert len(rect_nodes) == 4
 
 
 def test_scene_graph_removes_redundant_header_subimage(tmp_path):
@@ -566,6 +598,26 @@ def test_scene_graph_applies_common_korean_ocr_corrections(tmp_path):
 
     text_node = next(node for node in scene.nodes if node.kind == "text")
     assert text_node.text == "핵심 메시지와 생산량 급감 시점 확인"
+
+
+def test_scene_graph_applies_common_slide_label_ocr_corrections(tmp_path):
+    image_path = tmp_path / "ocr-labels.png"
+    Image.new("RGB", (360, 120), "white").save(image_path)
+    project = Project(
+        id="scene-label-ocr-corrections",
+        image_path=str(image_path),
+        width=360,
+        height=120,
+        components=[
+            Component(id="section-b", type="text", bbox=BBox(x=20, y=20, width=240, height=24), text="B HOW IT WORKS", source="paddleocr"),
+            Component(id="section-d", type="text", bbox=BBox(x=20, y=60, width=180, height=24), text="D] KEY TAKEAWAY", source="paddleocr"),
+        ],
+    )
+
+    with Image.open(image_path).convert("RGBA") as source:
+        scene = build_scene_graph(project, source)
+
+    assert [node.text for node in scene.nodes if node.kind == "text"] == ["B) HOW IT WORKS", "D) KEY TAKEAWAY"]
 
 
 def test_scene_graph_uses_source_crop_for_chart_assets_to_keep_annotations(tmp_path):

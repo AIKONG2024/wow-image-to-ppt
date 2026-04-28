@@ -16,6 +16,8 @@ def erase_regions(image: Image.Image, image_bbox: BBox, erase_boxes: list[BBox])
             draw.rectangle(region, fill=255)
     if mask.getbbox() is None:
         return image
+    if _mask_coverage(mask) > 0.28:
+        return _fill_from_edge_color(image, mask)
     try:
         return _inpaint(image, mask)
     except Exception:
@@ -37,22 +39,34 @@ def _inpaint(image: Image.Image, mask: Image.Image) -> Image.Image:
 
 def _fill_from_edge_color(image: Image.Image, mask: Image.Image) -> Image.Image:
     rgba = image.convert("RGBA")
-    pixels = rgba.load()
-    mask_pixels = mask.load()
-    sample = []
-    for y in range(rgba.height):
-        for x in range(rgba.width):
-            if mask_pixels[x, y] == 0:
-                sample.append(pixels[x, y])
-            if len(sample) >= 512:
-                break
-        if len(sample) >= 512:
-            break
-    fill = sample[len(sample) // 2] if sample else (255, 255, 255, 255)
+    fill = _sample_light_background_color(rgba, mask)
     draw = ImageDraw.Draw(rgba)
     for region in _mask_regions(mask):
         draw.rectangle(region, fill=fill)
     return rgba
+
+
+def _sample_light_background_color(image: Image.Image, mask: Image.Image) -> tuple[int, int, int, int]:
+    pixels = image.load()
+    mask_pixels = mask.load()
+    step = max(1, min(image.width, image.height) // 96)
+    sample = []
+    for y in range(0, image.height, step):
+        for x in range(0, image.width, step):
+            if mask_pixels[x, y] == 0:
+                color = pixels[x, y]
+                luma = 0.299 * color[0] + 0.587 * color[1] + 0.114 * color[2]
+                sample.append((luma, color))
+    if not sample:
+        return (255, 255, 255, 255)
+    sample.sort(key=lambda item: item[0])
+    return sample[int(len(sample) * 0.82)][1]
+
+
+def _mask_coverage(mask: Image.Image) -> float:
+    pixels = mask.histogram()
+    covered = sum(count for value, count in enumerate(pixels) if value)
+    return covered / max(1, mask.width * mask.height)
 
 
 def _mask_regions(mask: Image.Image) -> list[tuple[int, int, int, int]]:

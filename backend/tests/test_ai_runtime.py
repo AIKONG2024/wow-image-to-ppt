@@ -423,7 +423,7 @@ def test_analysis_splits_outlined_shape_card_into_shape_and_inner_image(tmp_path
     assert split_components[1].bbox.width <= 42
 
 
-def test_normalize_graph_locks_chart_as_single_picture_unit():
+def test_normalize_graph_keeps_chart_text_editable_while_hiding_visual_fragments():
     components = [
         Component(id="chart", type="chart", bbox=BBox(x=20, y=20, width=180, height=90), source="sam3"),
         Component(id="axis", type="shape", bbox=BBox(x=30, y=95, width=150, height=3), source="opencv-residual"),
@@ -450,7 +450,7 @@ def test_normalize_graph_locks_chart_as_single_picture_unit():
     assert by_id["chart"].hidden is False
     assert by_id["axis"].hidden is True
     assert by_id["series"].hidden is True
-    assert by_id["axis-text"].hidden is True
+    assert by_id["axis-text"].hidden is False
     assert by_id["outside-text"].hidden is False
 
 
@@ -468,7 +468,7 @@ def test_normalize_graph_prefers_inner_plot_over_oversized_chart_panel():
     by_id = {component.id: component for component in normalized}
     assert by_id["panel-chart"].hidden is True
     assert by_id["plot-chart"].hidden is False
-    assert by_id["axis-text"].hidden is True
+    assert by_id["axis-text"].hidden is False
     assert by_id["card-icon"].hidden is False
     assert by_id["card-label"].hidden is False
 
@@ -572,7 +572,7 @@ def test_refine_chart_bbox_restores_title_label_above_refined_chart(tmp_path):
     assert next(component for component in components if component.id == "title-text").hidden is False
 
 
-def test_refine_chart_bbox_hides_internal_axis_ocr_after_refinement(tmp_path):
+def test_refine_chart_bbox_keeps_internal_axis_ocr_editable_after_refinement(tmp_path):
     image_path = tmp_path / "chart-axis-text.png"
     image = Image.new("RGB", (260, 180), "white")
     draw = ImageDraw.Draw(image)
@@ -588,7 +588,7 @@ def test_refine_chart_bbox_hides_internal_axis_ocr_after_refinement(tmp_path):
 
     _refine_chart_component_bboxes(image_path, components)
 
-    assert next(component for component in components if component.id == "axis-text").hidden is True
+    assert next(component for component in components if component.id == "axis-text").hidden is False
 
 
 def test_normalize_graph_synthesizes_panel_shape_from_hidden_chart_parent():
@@ -631,9 +631,9 @@ def test_normalize_graph_expands_inner_chart_to_labels_but_not_cards():
     assert by_id["plot-chart"].bbox.y <= 42
     assert by_id["plot-chart"].bbox.y + by_id["plot-chart"].bbox.height >= 188
     assert by_id["plot-chart"].bbox.y + by_id["plot-chart"].bbox.height < by_id["card-icon"].bbox.y
-    assert by_id["chart-title"].hidden is True
-    assert by_id["x-label"].hidden is True
-    assert by_id["caption"].hidden is True
+    assert by_id["chart-title"].hidden is False
+    assert by_id["x-label"].hidden is False
+    assert by_id["caption"].hidden is False
     assert by_id["card-icon"].hidden is False
     assert by_id["card-label"].hidden is False
 

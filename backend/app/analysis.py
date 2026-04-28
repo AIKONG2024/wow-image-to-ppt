@@ -461,7 +461,6 @@ def _refine_chart_component_bboxes(image_path: Path, components: list[Component]
         if _bbox_changed(component.bbox, refined):
             component.bbox = refined
     _restore_chart_overlay_labels(components)
-    _hide_chart_internal_text_labels(components)
 
 
 def _chart_content_bbox(rgb: np.ndarray, component: Component, components: list[Component]) -> BBox | None:
@@ -575,24 +574,6 @@ def _restore_chart_overlay_labels(components: list[Component]) -> None:
             if _horizontal_overlap_ratio(candidate.bbox, chart.bbox) < 0.12:
                 continue
             candidate.hidden = False
-            break
-
-
-def _hide_chart_internal_text_labels(components: list[Component]) -> None:
-    charts = [
-        component
-        for component in components
-        if not component.hidden and component.type in {"chart", "table"} and _bbox_area(component.bbox) >= 1200
-    ]
-    for text in components:
-        if text.hidden or text.type != "text":
-            continue
-        for chart in charts:
-            if text.bbox.y + text.bbox.height <= chart.bbox.y + 4:
-                continue
-            if _intersection_area(text.bbox, chart.bbox) < _bbox_area(text.bbox) * 0.25:
-                continue
-            text.hidden = True
             break
 
 
@@ -977,6 +958,8 @@ def _hide_chart_children(components: list[Component]) -> None:
             if child.id == parent.id or child.hidden:
                 continue
             if _containment_ratio(child.bbox, parent.bbox) < 0.68:
+                continue
+            if child.type == "text":
                 continue
             if child.type in {"chart", "table"} and _bbox_area(child.bbox) > _bbox_area(parent.bbox) * 0.72:
                 continue

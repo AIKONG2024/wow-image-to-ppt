@@ -70,3 +70,34 @@ def test_normalize_hides_page_scale_false_visual_parent_but_keeps_children():
 def test_classify_visual_marks_tall_side_illustration_as_image_not_chart():
     assert _classify_visual(width=540, height=941, image_width=1672, image_height=941) == "image"
     assert _classify_visual(width=586, height=300, image_width=1672, image_height=941) == "chart"
+
+
+def test_normalize_keeps_chart_internal_text_editable():
+    components = [
+        Component(
+            id="chart",
+            type="chart",
+            bbox=BBox(x=40, y=40, width=360, height=220),
+            source="opencv-residual",
+        ),
+        Component(
+            id="chart-title",
+            type="text",
+            bbox=BBox(x=120, y=52, width=160, height=24),
+            text="Editable chart title",
+            source="paddleocr",
+        ),
+        Component(
+            id="axis-label",
+            type="text",
+            bbox=BBox(x=70, y=180, width=90, height=18),
+            text="Editable axis",
+            source="paddleocr",
+        ),
+    ]
+
+    normalized = normalize_component_graph(components)
+    by_id = {component.id: component for component in normalized}
+
+    assert not by_id["chart-title"].hidden
+    assert not by_id["axis-label"].hidden

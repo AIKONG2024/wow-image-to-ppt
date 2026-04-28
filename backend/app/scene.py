@@ -21,6 +21,8 @@ OCR_TEXT_REPLACEMENTS = (
     ("나빳", "나빴"),
     ("S0 S", "So"),
     ("A)(", "A)"),
+    ("B HOW", "B) HOW"),
+    ("D] ", "D) "),
 )
 SOURCE_CROP_VISUAL_TYPES = {"chart", "table", "diagram"}
 
@@ -35,35 +37,11 @@ def build_scene_graph(project: Project, source: Image.Image) -> SceneGraph:
     _normalize_dark_label_rects(nodes)
     _trim_chart_images_below_overlapping_text_labels(nodes)
     nodes = _preserve_complex_shape_regions(nodes, source)
-    nodes = _preserve_dense_icon_text_panels(nodes, project.width, project.height)
-    nodes = _remove_text_inside_large_image_nodes(nodes, project.width, project.height)
     nodes.extend(_synthesized_info_card_rects(nodes, project.width, project.height))
     nodes.extend(_synthesized_text_background_rects(nodes, source))
     nodes.extend(_synthesized_bullet_texts(nodes, source))
     _mark_text_regions_for_picture_erasing(nodes)
     return SceneGraph(width=project.width, height=project.height, nodes=nodes)
-
-
-def _remove_text_inside_large_image_nodes(nodes: list[SceneNode], width: int, height: int) -> list[SceneNode]:
-    large_images = [
-        node
-        for node in nodes
-        if node.kind == "image"
-        and node.source_component_type == "image"
-        and _bbox_area(node.bbox) >= width * height * 0.12
-        and node.bbox.height >= height * 0.35
-    ]
-    if not large_images:
-        return nodes
-    removed_text_ids = {
-        node.id
-        for node in nodes
-        if node.kind == "text"
-        and any(_containment_ratio(node.bbox, image_node.bbox) >= 0.82 for image_node in large_images)
-    }
-    if not removed_text_ids:
-        return nodes
-    return [node for node in nodes if node.id not in removed_text_ids]
 
 
 def _trim_text_nodes_at_large_side_images(nodes: list[SceneNode], width: int, height: int) -> list[SceneNode]:
@@ -265,19 +243,28 @@ def _remove_redundant_header_images(nodes: list[SceneNode], width: int, height: 
 
 def _mark_text_regions_for_picture_erasing(nodes: list[SceneNode]) -> None:
     text_nodes = [node for node in nodes if node.kind == "text" and node.text]
+    scene_width = _scene_width(nodes)
+    scene_height = _scene_height(nodes)
     for image_node in nodes:
         if image_node.kind != "image":
             continue
-        if image_node.source_component_type in {"chart", "table", "icon"}:
+        if image_node.source_component_type == "icon":
             continue
+        protect_large_art_text = image_node.source_component_type == "image" and _is_large_side_image(
+            image_node.bbox, scene_width, scene_height
+        )
         image_node.erase_boxes = [
             text_node.bbox
             for text_node in text_nodes
-            if _should_erase_text_from_image(image_node.bbox, text_node.bbox)
+            if _should_erase_text_from_image(
+                image_node.bbox, text_node.bbox, protect_large_art_text=protect_large_art_text
+            )
         ]
 
 
-def _should_erase_text_from_image(image_bbox: BBox, text_bbox: BBox) -> bool:
+def _should_erase_text_from_image(
+    image_bbox: BBox, text_bbox: BBox, *, protect_large_art_text: bool = False
+) -> bool:
     intersection = _intersection_area(text_bbox, image_bbox)
     if intersection <= 0:
         return False
@@ -287,7 +274,21 @@ def _should_erase_text_from_image(image_bbox: BBox, text_bbox: BBox) -> bool:
         return False
     text_covered = intersection / text_area
     image_covered = intersection / image_area
+    if protect_large_art_text and text_area / image_area > 0.14:
+        return False
     return text_covered >= 0.55 and image_covered <= 0.55
+
+
+def _scene_width(nodes: list[SceneNode]) -> int:
+    if not nodes:
+        return 1
+    return max(1, int(round(max(node.bbox.x + node.bbox.width for node in nodes))))
+
+
+def _scene_height(nodes: list[SceneNode]) -> int:
+    if not nodes:
+        return 1
+    return max(1, int(round(max(node.bbox.y + node.bbox.height for node in nodes))))
 
 
 def _preserve_complex_shape_regions(nodes: list[SceneNode], source: Image.Image) -> list[SceneNode]:
@@ -315,77 +316,6 @@ def _preserve_complex_shape_regions(nodes: list[SceneNode], source: Image.Image)
     return _replace_regions_with_source_images(nodes, candidates)
 
 
-def _preserve_dense_icon_text_panels(nodes: list[SceneNode], width: int, height: int) -> list[SceneNode]:
-    icon_nodes = [
-        node
-        for node in nodes
-        if node.kind == "image"
-        and node.source_component_type == "icon"
-        and node.bbox.height >= 24
-        and node.bbox.y >= height * 0.12
-    ]
-    if len(icon_nodes) < 3:
-        return nodes
-
-    clusters: list[list[SceneNode]] = []
-    for icon in sorted(icon_nodes, key=lambda item: (item.bbox.x, item.bbox.y)):
-        for cluster in clusters:
-            cluster_center = sum(item.bbox.x + item.bbox.width / 2 for item in cluster) / len(cluster)
-            icon_center = icon.bbox.x + icon.bbox.width / 2
-            if abs(icon_center - cluster_center) <= max(34.0, width * 0.035):
-                cluster.append(icon)
-                break
-        else:
-            clusters.append([icon])
-
-    panel_candidates: list[SceneNode] = []
-    for cluster in clusters:
-        cluster.sort(key=lambda item: item.bbox.y)
-        if len(cluster) < 3:
-            continue
-        cluster_box = _bbox_union([node.bbox for node in cluster])
-        if cluster_box.height < height * 0.28:
-            continue
-        row_height = max(node.bbox.height for node in cluster)
-        y1 = max(0.0, cluster_box.y - max(54.0, row_height * 0.7))
-        y2 = min(float(height), cluster_box.y + cluster_box.height + max(22.0, row_height * 0.35))
-        search = BBox(
-            x=max(0.0, cluster_box.x - max(18.0, cluster_box.width * 0.2)),
-            y=y1,
-            width=min(float(width), cluster_box.x + max(420.0, width * 0.42)) - max(0.0, cluster_box.x - 18.0),
-            height=y2 - y1,
-        )
-        grouped = [
-            node
-            for node in nodes
-            if node.kind in {"text", "rect", "image"}
-            and node.source_component_type not in {"chart", "table"}
-            and _panel_search_containment(node.bbox, search) >= 0.35
-            and not _is_large_side_image(node.bbox, width, height)
-        ]
-        text_count = sum(1 for node in grouped if node.kind == "text")
-        icon_count = sum(1 for node in grouped if node.kind == "image" and node.source_component_type == "icon")
-        if text_count < 3 or icon_count < 3:
-            continue
-        bbox = _clip_bbox(_expanded_bbox(_bbox_union([node.bbox for node in grouped]), 18.0, 12.0), width, height)
-        if bbox.width < width * 0.22 or bbox.height < height * 0.28:
-            continue
-        panel_candidates.append(
-            SceneNode(
-                id=f"dense-panel-{uuid.uuid4().hex[:10]}",
-                kind="image",
-                bbox=bbox,
-                source_component_id="+".join(node.source_component_id or node.id for node in grouped[:8]),
-                source_component_type="image",
-                z_index=1750,
-            )
-        )
-
-    if not panel_candidates:
-        return nodes
-    return _replace_regions_with_source_images(nodes, panel_candidates)
-
-
 def _replace_regions_with_source_images(nodes: list[SceneNode], regions: list[SceneNode]) -> list[SceneNode]:
     if not regions:
         return nodes
@@ -397,7 +327,7 @@ def _replace_regions_with_source_images(nodes: list[SceneNode], regions: list[Sc
                 continue
             if node.kind in {"line", "arrow"}:
                 continue
-            if _containment_ratio(node.bbox, region.bbox) >= 0.68:
+            if node.kind != "text" and _containment_ratio(node.bbox, region.bbox) >= 0.68:
                 removed.add(node.id)
     kept = [node for node in nodes if node.id not in removed]
     return [*kept, *regions]
@@ -425,10 +355,6 @@ def _contains_large_chart_image(bbox: BBox, nodes: list[SceneNode]) -> bool:
 
 def _is_large_side_image(bbox: BBox, width: int, height: int) -> bool:
     return bbox.height >= height * 0.55 and bbox.width >= width * 0.18
-
-
-def _panel_search_containment(bbox: BBox, search: BBox) -> float:
-    return _intersection_area(bbox, search) / max(1.0, _bbox_area(bbox))
 
 
 def _is_top_header_region(bbox: BBox, width: int, height: int) -> bool:

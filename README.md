@@ -11,7 +11,7 @@ Nanobanana, Duct Tape 같은 이미지 생성 모델이 만든 16:9 슬라이드
 - PaddleOCR로 텍스트를 추출해 PPT 텍스트박스로 만듭니다.
 - SAM3가 활성화되어 있으면 아이콘, 그림, 차트, 다이어그램 같은 시각 요소를 의미 단위로 분리합니다.
 - SAM3가 없으면 OpenCV fallback으로 기본 컴포넌트를 추출합니다.
-- 스타일이 복잡한 패널과 배너는 원본과 최대한 같아 보이도록 picture backplate로 보존합니다.
+- 스타일이 복잡한 패널과 배너도 배경 picture/shape와 editable text layer로 분리합니다.
 - 브라우저 UI에서 컴포넌트를 드래그 선택하고 `merge`, `split`, `delete`로 보정할 수 있습니다.
 - 현재 컴포넌트 그래프를 SVG scene으로 확인하고 PPTX로 export합니다.
 
@@ -35,7 +35,7 @@ Generated files:
 - [Scene SVG](docs/examples/one-pun-scene.svg)
 - [Analysis summary](docs/examples/one-pun-analysis-summary.json)
 
-The checked-in example was generated from the current local runtime. In that run PaddleOCR was active and SAM3 was not active, so visual segmentation used OpenCV fallback. The exporter keeps highly stylized panels as movable picture components to preserve visual fidelity, while simpler top-level text remains editable. Enable SAM3 for better semantic image/icon separation.
+The checked-in example was generated from the current local runtime. In that run PaddleOCR was active and SAM3 was not active, so visual segmentation used OpenCV fallback. The exporter prioritizes editability: OCR text is exported as PowerPoint text boxes, while charts, icons, illustration regions, and complex backplates remain movable picture components. Enable SAM3 for better semantic image/icon separation.
 
 ## Quick Start
 
@@ -128,8 +128,8 @@ Korean version:
 
 ## Current Scope
 
-- Simple top-level text becomes editable PPT text.
-- Highly stylized text inside dense infographic panels may remain inside a movable picture component to preserve the original look.
+- OCR text becomes editable PPT text whenever it is detected.
+- Highly stylized text can still need manual correction after OCR, but it is exported as a text box rather than being intentionally hidden inside a picture.
 - Shapes and frames are reconstructed as PPT shapes when they are simple enough.
 - Complex charts, illustrations, icons, and photos are exported as movable picture components.
 - Native chart recreation is not implemented yet.
