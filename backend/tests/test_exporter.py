@@ -260,6 +260,38 @@ def test_export_writes_report_box_as_native_shape_not_picture(tmp_path):
     assert '<a:srgbClr val="DBEAFE"/>' in xml
 
 
+def test_export_places_text_above_synthesized_background_shapes(tmp_path):
+    image_path = tmp_path / "dark-label.png"
+    image = Image.new("RGB", (180, 100), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([20, 44, 150, 72], fill="#111827")
+    draw.rectangle([38, 52, 120, 62], fill="white")
+    image.save(image_path)
+    project = Project(
+        id="text-top-export",
+        image_path=str(image_path),
+        width=180,
+        height=100,
+        status="analyzed",
+        components=[
+            Component(
+                id="label",
+                type="text",
+                bbox=BBox(x=38, y=52, width=82, height=10),
+                text="Editable label",
+                source="paddleocr",
+            )
+        ],
+    )
+
+    pptx_path = export_pptx(project, project_store(tmp_path))
+
+    prs = Presentation(str(pptx_path))
+    slide = prs.slides[0]
+    assert slide.shapes[-1].has_text_frame
+    assert slide.shapes[-1].text == "Editable label"
+
+
 def test_export_writes_arrow_component_as_connector_not_picture(tmp_path):
     image_path = source_slide(tmp_path)
     project = Project(

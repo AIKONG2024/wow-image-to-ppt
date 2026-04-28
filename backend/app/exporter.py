@@ -13,7 +13,7 @@ from pptx.util import Inches, Pt
 
 from .image_editing import erase_regions
 from .models import Project, SceneNode
-from .scene import build_scene_graph
+from .scene import build_scene_graph, scene_paint_order
 from .storage import ProjectStore
 
 SLIDE_WIDTH = 13.333333
@@ -34,7 +34,7 @@ def export_pptx(project: Project, store: ProjectStore) -> Path:
         source = opened.convert("RGBA")
     scene = build_scene_graph(project, source)
 
-    for node in scene.nodes:
+    for node in scene_paint_order(scene.nodes):
         x = offset_x + node.bbox.x * scale
         y = offset_y + node.bbox.y * scale
         width = node.bbox.width * scale

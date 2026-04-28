@@ -170,7 +170,7 @@ def render_scene_svg(scene: SceneGraph, source: Image.Image) -> str:
         "</defs>",
         f'<rect x="0" y="0" width="{scene.width}" height="{scene.height}" fill="#ffffff"/>',
     ]
-    for node in sorted(scene.nodes, key=lambda item: (item.z_index, item.bbox.y, item.bbox.x)):
+    for node in scene_paint_order(scene.nodes):
         if node.kind == "rect":
             parts.append(_rect_svg(node))
         elif node.kind == "image":
@@ -183,6 +183,10 @@ def render_scene_svg(scene: SceneGraph, source: Image.Image) -> str:
             parts.append(_line_svg(node))
     parts.append("</svg>")
     return "\n".join(parts)
+
+
+def scene_paint_order(nodes: list[SceneNode]) -> list[SceneNode]:
+    return sorted(nodes, key=lambda item: (item.kind == "text", item.z_index, item.bbox.y, item.bbox.x))
 
 
 def _primitive_to_scene_node(primitive: PptPrimitive) -> SceneNode:
