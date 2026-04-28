@@ -1,4 +1,4 @@
-from app.analysis import normalize_component_graph
+from app.analysis import _classify_visual, normalize_component_graph
 from app.models import BBox, Component
 
 
@@ -65,3 +65,8 @@ def test_normalize_hides_page_scale_false_visual_parent_but_keeps_children():
     assert not by_id["title"].hidden
     assert not by_id["section"].hidden
     assert not by_id["icon"].hidden
+
+
+def test_classify_visual_marks_tall_side_illustration_as_image_not_chart():
+    assert _classify_visual(width=540, height=941, image_width=1672, image_height=941) == "image"
+    assert _classify_visual(width=586, height=300, image_width=1672, image_height=941) == "chart"

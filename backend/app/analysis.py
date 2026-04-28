@@ -280,6 +280,8 @@ def _prompt_to_type(prompt: str) -> str:
 
 
 def _classify_visual(width: int, height: int, image_width: int, image_height: int) -> str:
+    if height > image_height * 0.65 and image_width * 0.18 <= width <= image_width * 0.45:
+        return "image"
     if height < image_height * 0.09 or (width > image_width * 0.55 and height < image_height * 0.16):
         return "shape"
     if width > image_width * 0.45 and height < image_height * 0.55:

@@ -1,5 +1,5 @@
 {
-  "project_id": "a4ddbfb4dff847878dc423c30aeb93aa",
+  "project_id": "7824d56e73804b3da612a201bec08995",
   "runtime": {
     "paddleocr": {
       "available": true,
@@ -31,18 +31,19 @@
     ],
     "analysis_mode": "opencv-fallback"
   },
-  "components_visible": 55,
+  "components_visible": 59,
   "component_types": {
-    "chart": 3,
-    "text": 42,
-    "shape": 5,
-    "icon": 5
+    "image": 1,
+    "icon": 6,
+    "text": 43,
+    "shape": 7,
+    "chart": 2
   },
-  "scene_nodes": 63,
+  "scene_nodes": 53,
   "scene_node_types": {
-    "rect": 10,
-    "image": 8,
-    "text": 45
+    "rect": 9,
+    "image": 9,
+    "text": 35
   },
   "files": {
     "input": "docs/examples/one-pun-input.png",

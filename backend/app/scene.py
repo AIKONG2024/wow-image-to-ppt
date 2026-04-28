@@ -19,6 +19,8 @@ OCR_TEXT_REPLACEMENTS = (
     ("급감 시정", "급감 시점"),
     ("발생 시정", "발생 시점"),
     ("나빳", "나빴"),
+    ("S0 S", "So"),
+    ("A)(", "A)"),
 )
 SOURCE_CROP_VISUAL_TYPES = {"chart", "table", "diagram"}
 
@@ -28,13 +30,117 @@ def build_scene_graph(project: Project, source: Image.Image) -> SceneGraph:
     nodes = [_primitive_to_scene_node(primitive) for primitive in primitives]
     nodes = _remove_redundant_header_images(nodes, project.width, project.height)
     _mark_text_colors(nodes, source)
+    nodes = _merge_adjacent_text_line_nodes(nodes)
     _normalize_dark_label_rects(nodes)
     _trim_chart_images_below_overlapping_text_labels(nodes)
+    nodes = _remove_text_inside_large_image_nodes(nodes, project.width, project.height)
     nodes.extend(_synthesized_info_card_rects(nodes, project.width, project.height))
     nodes.extend(_synthesized_text_background_rects(nodes, source))
     nodes.extend(_synthesized_bullet_texts(nodes, source))
     _mark_text_regions_for_picture_erasing(nodes)
     return SceneGraph(width=project.width, height=project.height, nodes=nodes)
+
+
+def _remove_text_inside_large_image_nodes(nodes: list[SceneNode], width: int, height: int) -> list[SceneNode]:
+    large_images = [
+        node
+        for node in nodes
+        if node.kind == "image"
+        and node.source_component_type == "image"
+        and _bbox_area(node.bbox) >= width * height * 0.12
+        and node.bbox.height >= height * 0.35
+    ]
+    if not large_images:
+        return nodes
+    removed_text_ids = {
+        node.id
+        for node in nodes
+        if node.kind == "text"
+        and any(_containment_ratio(node.bbox, image_node.bbox) >= 0.82 for image_node in large_images)
+    }
+    if not removed_text_ids:
+        return nodes
+    return [node for node in nodes if node.id not in removed_text_ids]
+
+
+def _merge_adjacent_text_line_nodes(nodes: list[SceneNode]) -> list[SceneNode]:
+    text_nodes = [node for node in nodes if node.kind == "text" and node.text]
+    if len(text_nodes) < 2:
+        return nodes
+    other_nodes = [node for node in nodes if not (node.kind == "text" and node.text)]
+    rows: list[list[SceneNode]] = []
+    for node in sorted(text_nodes, key=lambda item: (item.bbox.y + item.bbox.height / 2, item.bbox.x)):
+        for row in rows:
+            if _same_text_row(row[0].bbox, node.bbox):
+                row.append(node)
+                break
+        else:
+            rows.append([node])
+
+    merged: list[SceneNode] = []
+    for row in rows:
+        row.sort(key=lambda item: item.bbox.x)
+        current: list[SceneNode] = []
+        for node in row:
+            if not current:
+                current = [node]
+                continue
+            previous = current[-1]
+            gap = node.bbox.x - (previous.bbox.x + previous.bbox.width)
+            max_gap = max(28.0, min(previous.bbox.height, node.bbox.height) * 1.15)
+            if gap <= max_gap and _similar_text_color(previous.text_color, node.text_color) and _should_merge_text_neighbors(previous, node):
+                current.append(node)
+            else:
+                merged.append(_merge_text_run(current))
+                current = [node]
+        if current:
+            merged.append(_merge_text_run(current))
+    return [*other_nodes, *merged]
+
+
+def _same_text_row(left: BBox, right: BBox) -> bool:
+    center_delta = abs((left.y + left.height / 2) - (right.y + right.height / 2))
+    height = max(1.0, min(left.height, right.height))
+    return center_delta <= max(5.0, height * 0.45) and _vertical_overlap_ratio(left, right) >= 0.45
+
+
+def _similar_text_color(left: str | None, right: str | None) -> bool:
+    if not left or not right:
+        return True
+    return abs(_hex_luma(left) - _hex_luma(right)) <= 80
+
+
+def _should_merge_text_neighbors(left: SceneNode, right: SceneNode) -> bool:
+    if _is_large_number_label(left, right) or _is_large_number_label(right, left):
+        return False
+    return True
+
+
+def _is_large_number_label(candidate: SceneNode, neighbor: SceneNode) -> bool:
+    text = (candidate.text or "").strip()
+    return (
+        text.isdigit()
+        and len(text) <= 2
+        and candidate.bbox.height >= neighbor.bbox.height * 1.6
+        and candidate.bbox.width <= max(48.0, neighbor.bbox.height * 2.4)
+    )
+
+
+def _merge_text_run(nodes: list[SceneNode]) -> SceneNode:
+    if len(nodes) == 1:
+        return nodes[0]
+    bbox = _bbox_union([node.bbox for node in nodes])
+    text = " ".join((node.text or "").strip() for node in nodes if (node.text or "").strip())
+    return SceneNode(
+        id=f"text-line-{uuid.uuid4().hex[:10]}",
+        kind="text",
+        bbox=bbox,
+        source_component_id="+".join(node.source_component_id or node.id for node in nodes),
+        source_component_type="text",
+        text=_normalize_ocr_text(text),
+        text_color=nodes[0].text_color,
+        z_index=max(node.z_index for node in nodes),
+    )
 
 
 def render_scene_svg(scene: SceneGraph, source: Image.Image) -> str:
@@ -134,10 +240,15 @@ def _mark_text_regions_for_picture_erasing(nodes: list[SceneNode]) -> None:
 
 
 def _mark_text_colors(nodes: list[SceneNode], source: Image.Image) -> None:
+    dark_rects = [
+        node
+        for node in nodes
+        if node.kind == "rect" and node.fill_color is not None and _hex_luma(node.fill_color) <= 120
+    ]
     for node in nodes:
         if node.kind == "text" and node.text:
             node.text_color = _estimate_text_color(source, node.bbox)
-            if node.bbox.y < source.height * 0.07 and _hex_luma(node.text_color) < 95:
+            if _hex_luma(node.text_color) < 140 and _has_dark_containing_rect(node.bbox, dark_rects):
                 node.text_color = "FFFFFF"
 
 
@@ -387,7 +498,7 @@ def _detect_text_background_rect(text_node: SceneNode, source: Image.Image) -> S
     )
     if bbox.width < text_node.bbox.width * 0.85 or bbox.height < text_node.bbox.height * 0.75:
         return None
-    if bbox.width < text_node.bbox.width * 1.15 and bbox.height < text_node.bbox.height * 1.25:
+    if bbox.width < text_node.bbox.width * 1.08 or bbox.height < text_node.bbox.height * 1.18:
         return None
     if _intersection_area(text_node.bbox, bbox) < _bbox_area(text_node.bbox) * 0.45:
         return None
@@ -410,7 +521,10 @@ def _estimate_text_color(source: Image.Image, bbox: BBox) -> str:
     if crop.width == 0 or crop.height == 0:
         return "111827"
     rgb = np.asarray(crop, dtype=np.int16)
-    background = np.array(_dominant_color(rgb.reshape(-1, 3)), dtype=np.int16)
+    local_dark_text = _light_foreground_on_dark_local_background(rgb)
+    if local_dark_text is not None:
+        return _rgb_to_hex(local_dark_text)
+    background = np.array(_estimate_background_color(source, bbox), dtype=np.int16)
     distance = np.max(np.abs(rgb - background), axis=2)
     foreground = rgb[distance > 34]
     if len(foreground) < max(6, int(rgb.shape[0] * rgb.shape[1] * 0.015)):
@@ -424,6 +538,56 @@ def _estimate_text_color(source: Image.Image, bbox: BBox) -> str:
             return _rgb_to_hex(color)
     color = _contrasting_foreground_color(foreground, background)
     return _rgb_to_hex(tuple(int(round(channel)) for channel in color))
+
+
+def _light_foreground_on_dark_local_background(rgb: np.ndarray) -> tuple[int, int, int] | None:
+    pixels = rgb.reshape(-1, 3)
+    luma = _pixel_luma(pixels)
+    dark_ratio = float(np.count_nonzero(luma < 95)) / max(1, len(luma))
+    border_luma = _pixel_luma(_border_pixels(rgb))
+    border_dark_ratio = float(np.count_nonzero(border_luma < 95)) / max(1, len(border_luma))
+    bright = pixels[luma > 175]
+    bright_ratio = float(len(bright)) / max(1, len(luma))
+    if dark_ratio < 0.48 or border_dark_ratio < 0.45 or bright_ratio < 0.025:
+        return None
+    color = _dominant_color(bright)
+    if _luma(np.array(color, dtype=np.int16)) < 150:
+        return None
+    return color
+
+
+def _estimate_background_color(source: Image.Image, bbox: BBox) -> tuple[int, int, int]:
+    sample_bbox = _clip_bbox(
+        _expanded_bbox(
+            bbox,
+            max(4.0, bbox.width * 0.12),
+            max(3.0, bbox.height * 0.35),
+        ),
+        source.width,
+        source.height,
+    )
+    sample = _crop(source, sample_bbox).convert("RGB")
+    pixels = np.asarray(sample, dtype=np.int16)
+    if pixels.size == 0:
+        return (255, 255, 255)
+    border = _border_pixels(pixels)
+    if len(border) >= 12:
+        return _dominant_color(border)
+    return _dominant_color(pixels.reshape(-1, 3))
+
+
+def _border_pixels(pixels: np.ndarray) -> np.ndarray:
+    height, width = pixels.shape[:2]
+    if height == 0 or width == 0:
+        return pixels.reshape(-1, 3)
+    thickness = max(1, min(height, width) // 8)
+    parts = [
+        pixels[:thickness, :, :],
+        pixels[-thickness:, :, :],
+        pixels[:, :thickness, :],
+        pixels[:, -thickness:, :],
+    ]
+    return np.concatenate([part.reshape(-1, 3) for part in parts], axis=0)
 
 
 def _dominant_color(pixels: np.ndarray) -> tuple[int, int, int]:
@@ -538,7 +702,7 @@ def _svg_text_font_size(bbox: BBox, text: str) -> float:
     longest = max(text.splitlines() or [text], key=len)
     by_width = bbox.width / max(_text_units(longest), 1.0) * 0.95
     by_height = bbox.height * 0.72
-    return max(8.0, min(32.0, by_width, by_height))
+    return max(8.0, min(96.0, by_width, by_height))
 
 
 def _text_units(text: str) -> float:
@@ -607,6 +771,11 @@ def _horizontal_intersection(left: BBox, right: BBox) -> float:
     x1 = max(left.x, right.x)
     x2 = min(left.x + left.width, right.x + right.width)
     return max(0.0, x2 - x1)
+
+
+def _vertical_overlap_ratio(left: BBox, right: BBox) -> float:
+    overlap = max(0.0, min(left.y + left.height, right.y + right.height) - max(left.y, right.y))
+    return overlap / max(1.0, min(left.height, right.height))
 
 
 def _bbox_area(bbox: BBox) -> float:

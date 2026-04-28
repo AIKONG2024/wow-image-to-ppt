@@ -104,6 +104,31 @@ def test_scene_graph_does_not_erase_text_inside_chart_pictures(tmp_path):
     assert image_node.erase_boxes == []
 
 
+def test_scene_graph_keeps_text_inside_large_illustration_as_part_of_image(tmp_path):
+    image_path = tmp_path / "illustration.png"
+    image = Image.new("RGB", (300, 160), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([120, 0, 300, 160], fill="#d71920")
+    draw.rectangle([190, 104, 276, 134], fill="white")
+    image.save(image_path)
+    project = Project(
+        id="scene-large-illustration-text",
+        image_path=str(image_path),
+        width=300,
+        height=160,
+        components=[
+            Component(id="hero-image", type="image", bbox=BBox(x=120, y=0, width=180, height=160), source="opencv-residual"),
+            Component(id="decorative-text", type="text", bbox=BBox(x=190, y=104, width=86, height=30), text="BAM", source="paddleocr"),
+        ],
+    )
+
+    with Image.open(image_path).convert("RGBA") as source:
+        scene = build_scene_graph(project, source)
+
+    assert [node.kind for node in scene.nodes] == ["image"]
+    assert scene.nodes[0].erase_boxes == []
+
+
 def test_scene_graph_removes_redundant_header_subimage(tmp_path):
     image_path = tmp_path / "slide.png"
     image = Image.new("RGB", (220, 120), "white")
@@ -187,6 +212,89 @@ def test_scene_graph_estimates_dark_text_color_on_light_label(tmp_path):
     assert red + green + blue < 260
 
 
+def test_scene_graph_keeps_top_black_title_dark_on_white_background(tmp_path):
+    image_path = tmp_path / "top-title.png"
+    image = Image.new("RGB", (260, 120), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([24, 8, 210, 58], fill="black")
+    image.save(image_path)
+    project = Project(
+        id="scene-top-black-title",
+        image_path=str(image_path),
+        width=260,
+        height=120,
+        components=[
+            Component(
+                id="title",
+                type="text",
+                bbox=BBox(x=24, y=8, width=186, height=50),
+                text="Title",
+                source="paddleocr",
+            ),
+        ],
+    )
+
+    with Image.open(image_path).convert("RGBA") as source:
+        scene = build_scene_graph(project, source)
+        svg = render_scene_svg(scene, source)
+
+    text_node = next(node for node in scene.nodes if node.kind == "text")
+    assert _color_luma(text_node.text_color) < 60
+
+    root = ElementTree.fromstring(svg)
+    text = next(item for item in root.iter() if item.tag.endswith("text"))
+    assert float(text.attrib["font-size"]) >= 34
+
+
+def test_scene_graph_merges_adjacent_ocr_words_on_same_title_line(tmp_path):
+    image_path = tmp_path / "title-line.png"
+    Image.new("RGB", (520, 120), "white").save(image_path)
+    project = Project(
+        id="scene-title-merge",
+        image_path=str(image_path),
+        width=520,
+        height=120,
+        components=[
+            Component(id="why", type="text", bbox=BBox(x=12, y=8, width=74, height=56), text="Why Is", source="paddleocr"),
+            Component(id="one", type="text", bbox=BBox(x=92, y=10, width=58, height=52), text="One", source="paddleocr"),
+            Component(id="punch", type="text", bbox=BBox(x=154, y=10, width=100, height=52), text="Punch", source="paddleocr"),
+            Component(id="man", type="text", bbox=BBox(x=258, y=10, width=68, height=52), text="Man", source="paddleocr"),
+            Component(id="so", type="text", bbox=BBox(x=330, y=10, width=52, height=52), text="S0 S", source="paddleocr"),
+            Component(id="strong", type="text", bbox=BBox(x=386, y=10, width=120, height=52), text="Strong?", source="paddleocr"),
+        ],
+    )
+
+    with Image.open(image_path).convert("RGBA") as source:
+        scene = build_scene_graph(project, source)
+
+    text_nodes = [node for node in scene.nodes if node.kind == "text"]
+    assert len(text_nodes) == 1
+    assert text_nodes[0].text == "Why Is One Punch Man So Strong?"
+    assert text_nodes[0].bbox.x == 12
+    assert text_nodes[0].bbox.x + text_nodes[0].bbox.width == 506
+
+
+def test_scene_graph_does_not_merge_large_number_label_with_body_text(tmp_path):
+    image_path = tmp_path / "number-label.png"
+    Image.new("RGB", (320, 120), "white").save(image_path)
+    project = Project(
+        id="scene-number-label",
+        image_path=str(image_path),
+        width=320,
+        height=120,
+        components=[
+            Component(id="number", type="text", bbox=BBox(x=36, y=28, width=32, height=56), text="1", source="paddleocr"),
+            Component(id="body", type="text", bbox=BBox(x=96, y=40, width=180, height=20), text="Saitama was designed", source="paddleocr"),
+        ],
+    )
+
+    with Image.open(image_path).convert("RGBA") as source:
+        scene = build_scene_graph(project, source)
+
+    text_nodes = sorted([node for node in scene.nodes if node.kind == "text"], key=lambda node: node.bbox.x)
+    assert [node.text for node in text_nodes] == ["1", "Saitama was designed"]
+
+
 def test_scene_graph_prefers_light_text_over_shadow_on_dark_header(tmp_path):
     image_path = tmp_path / "slide.png"
     image = Image.new("RGB", (220, 100), "#0f4f55")
@@ -213,6 +321,40 @@ def test_scene_graph_prefers_light_text_over_shadow_on_dark_header(tmp_path):
     green = int(text_node.text_color[2:4], 16)
     blue = int(text_node.text_color[4:6], 16)
     assert red + green + blue > 660
+
+
+def test_scene_graph_does_not_turn_plain_dark_heading_into_background_rect(tmp_path):
+    image_path = tmp_path / "plain-heading.png"
+    image = Image.new("RGB", (260, 160), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([42, 82, 198, 106], fill="black")
+    image.save(image_path)
+    project = Project(
+        id="scene-plain-dark-heading",
+        image_path=str(image_path),
+        width=260,
+        height=160,
+        components=[
+            Component(
+                id="heading",
+                type="text",
+                bbox=BBox(x=42, y=82, width=156, height=24),
+                text="BUILT AS A SATIRE",
+                source="paddleocr",
+            ),
+        ],
+    )
+
+    with Image.open(image_path).convert("RGBA") as source:
+        scene = build_scene_graph(project, source)
+
+    text_node = next(node for node in scene.nodes if node.kind == "text")
+    assert _color_luma(text_node.text_color) < 60
+    assert not [
+        node
+        for node in scene.nodes
+        if node.kind == "rect" and node.fill_color and _color_luma(node.fill_color) < 60
+    ]
 
 
 def test_scene_graph_synthesizes_missing_colored_text_background_rect(tmp_path):
@@ -460,3 +602,11 @@ def _first_embedded_png(svg: str) -> Image.Image:
     start = svg.index(prefix) + len(prefix)
     end = svg.index('"', start)
     return Image.open(BytesIO(base64.b64decode(svg[start:end]))).convert("RGBA")
+
+
+def _color_luma(hex_color: str | None) -> float:
+    assert hex_color is not None
+    red = int(hex_color[0:2], 16)
+    green = int(hex_color[2:4], 16)
+    blue = int(hex_color[4:6], 16)
+    return red * 0.2126 + green * 0.7152 + blue * 0.0722
