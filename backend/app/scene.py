@@ -36,6 +36,8 @@ def build_scene_graph(project: Project, source: Image.Image) -> SceneGraph:
     _normalize_dark_label_rects(nodes)
     _trim_chart_images_below_overlapping_text_labels(nodes)
     nodes = _preserve_complex_shape_regions(nodes, source)
+    nodes.extend(_synthesized_number_badge_rects(nodes, source))
+    _normalize_number_label_text_boxes(nodes)
     nodes.extend(_synthesized_info_card_rects(nodes, project.width, project.height))
     nodes.extend(_synthesized_text_background_rects(nodes, source))
     nodes.extend(_synthesized_bullet_texts(nodes, source))
@@ -245,6 +247,7 @@ def _remove_redundant_header_images(nodes: list[SceneNode], width: int, height: 
 
 def _preserve_complex_shape_regions(nodes: list[SceneNode], source: Image.Image) -> list[SceneNode]:
     candidates: list[SceneNode] = []
+    text_nodes = [node for node in nodes if node.kind == "text" and node.text]
     for node in nodes:
         if not (
             node.kind == "rect"
@@ -253,6 +256,7 @@ def _preserve_complex_shape_regions(nodes: list[SceneNode], source: Image.Image)
             and not _is_top_header_region(node.bbox, source.width, source.height)
             and _is_complex_source_region(source, node.bbox)
             and not _contains_large_chart_image(node.bbox, nodes)
+            and not _is_number_badge_backplate(node.bbox, text_nodes)
         ):
             continue
         candidates.append(
@@ -283,6 +287,173 @@ def _replace_regions_with_source_images(nodes: list[SceneNode], regions: list[Sc
                 removed.add(node.id)
     kept = [node for node in nodes if node.id not in removed]
     return [*kept, *regions]
+
+
+def _synthesized_number_badge_rects(nodes: list[SceneNode], source: Image.Image) -> list[SceneNode]:
+    text_nodes = [node for node in nodes if _is_large_digit_text_node(node)]
+    if not text_nodes:
+        return []
+    synthesized: list[SceneNode] = []
+    for text_node in text_nodes:
+        if _matching_number_badge_rect(text_node, [*nodes, *synthesized]) is not None:
+            continue
+        detected = _detect_colored_number_badge(source, text_node.bbox)
+        if detected is None:
+            continue
+        bbox, fill_color = detected
+        if _matching_number_badge_rect_for_bbox(bbox, [*nodes, *synthesized]) is not None:
+            continue
+        synthesized.append(
+            SceneNode(
+                id=f"number-badge-{uuid.uuid4().hex[:10]}",
+                kind="rect",
+                bbox=bbox,
+                source_component_id=text_node.source_component_id,
+                source_component_type="shape",
+                fill_color=fill_color,
+                z_index=950,
+            )
+        )
+    return synthesized
+
+
+def _normalize_number_label_text_boxes(nodes: list[SceneNode]) -> None:
+    badge_rects = [node for node in nodes if node.kind == "rect" and node.fill_color]
+    for text_node in nodes:
+        if not _is_large_digit_text_node(text_node):
+            continue
+        badge = _matching_number_badge_rect(text_node, badge_rects)
+        if badge is None:
+            continue
+        text_node.bbox = badge.bbox
+
+
+def _matching_number_badge_rect(text_node: SceneNode, nodes: list[SceneNode]) -> SceneNode | None:
+    candidates = [
+        node
+        for node in nodes
+        if node.kind == "rect"
+        and node.fill_color
+        and _is_number_badge_backplate(node.bbox, [text_node])
+    ]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda node: abs((node.bbox.y + node.bbox.height / 2) - (text_node.bbox.y + text_node.bbox.height / 2)))
+
+
+def _matching_number_badge_rect_for_bbox(bbox: BBox, nodes: list[SceneNode]) -> SceneNode | None:
+    for node in nodes:
+        if node.kind != "rect" or not node.fill_color:
+            continue
+        if _containment_ratio(bbox, _expanded_bbox(node.bbox, 3.0, 3.0)) >= 0.82:
+            return node
+        if _containment_ratio(node.bbox, _expanded_bbox(bbox, 3.0, 3.0)) >= 0.82:
+            return node
+    return None
+
+
+def _detect_colored_number_badge(source: Image.Image, text_bbox: BBox) -> tuple[BBox, str] | None:
+    search = _clip_bbox(
+        _expanded_bbox(
+            text_bbox,
+            max(12.0, text_bbox.width * 0.55),
+            max(10.0, text_bbox.height * 0.35),
+        ),
+        source.width,
+        source.height,
+    )
+    crop = _crop(source, search).convert("RGB")
+    if crop.width < 8 or crop.height < 8:
+        return None
+    rgb = np.asarray(crop, dtype=np.uint8)
+    spread = rgb.max(axis=2).astype(np.int16) - rgb.min(axis=2).astype(np.int16)
+    luma = _pixel_luma(rgb.reshape(-1, 3)).reshape(rgb.shape[:2])
+    mask = (spread > 45) & (rgb.max(axis=2) > 120) & (luma > 80) & (luma < 245)
+    if int(np.count_nonzero(mask)) < max(60, int(mask.size * 0.08)):
+        return None
+    component = _colored_mask_component(mask, search, text_bbox)
+    if component is None:
+        return None
+    bbox, component_mask = component
+    bbox = _clip_bbox(bbox, source.width, source.height)
+    if _bbox_area(bbox) < _bbox_area(text_bbox) * 1.08:
+        return None
+    if _containment_ratio(text_bbox, _expanded_bbox(bbox, 5.0, 5.0)) < 0.55:
+        return None
+    fill_color = _rgb_to_hex(_dominant_color(rgb[component_mask]))
+    return bbox, fill_color
+
+
+def _colored_mask_component(mask: np.ndarray, search: BBox, text_bbox: BBox) -> tuple[BBox, np.ndarray] | None:
+    height, width = mask.shape
+    visited = np.zeros_like(mask, dtype=bool)
+    target = _expanded_bbox(text_bbox, 5.0, 5.0)
+    best: tuple[BBox, list[tuple[int, int]], float] | None = None
+    starts_y, starts_x = np.where(mask)
+    for start_y, start_x in zip(starts_y.tolist(), starts_x.tolist()):
+        if visited[start_y, start_x]:
+            continue
+        stack = [(start_x, start_y)]
+        visited[start_y, start_x] = True
+        pixels: list[tuple[int, int]] = []
+        while stack:
+            x, y = stack.pop()
+            pixels.append((x, y))
+            for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
+                if nx < 0 or ny < 0 or nx >= width or ny >= height:
+                    continue
+                if visited[ny, nx] or not mask[ny, nx]:
+                    continue
+                visited[ny, nx] = True
+                stack.append((nx, ny))
+        if len(pixels) < 40:
+            continue
+        xs = [item[0] for item in pixels]
+        ys = [item[1] for item in pixels]
+        bbox = BBox(
+            x=search.x + float(min(xs)),
+            y=search.y + float(min(ys)),
+            width=float(max(xs) - min(xs) + 1),
+            height=float(max(ys) - min(ys) + 1),
+        )
+        overlap = _intersection_area(bbox, target)
+        if overlap <= 0:
+            continue
+        score = overlap + len(pixels) * 0.001
+        if best is None or score > best[2]:
+            best = (bbox, pixels, score)
+    if best is None:
+        return None
+    component_mask = np.zeros_like(mask, dtype=bool)
+    for x, y in best[1]:
+        component_mask[y, x] = True
+    return best[0], component_mask
+
+
+def _is_number_badge_backplate(bbox: BBox, text_nodes: list[SceneNode]) -> bool:
+    if bbox.width < 20 or bbox.height < 24:
+        return False
+    if bbox.width > 140 or bbox.height > 160:
+        return False
+    for text_node in text_nodes:
+        if not _is_large_digit_text_node(text_node):
+            continue
+        if _bbox_area(bbox) < _bbox_area(text_node.bbox) * 1.05:
+            continue
+        if _containment_ratio(text_node.bbox, _expanded_bbox(bbox, 5.0, 5.0)) >= 0.55:
+            return True
+    return False
+
+
+def _is_large_digit_text_node(node: SceneNode) -> bool:
+    text = (node.text or "").strip()
+    return (
+        node.kind == "text"
+        and text.isdigit()
+        and len(text) <= 2
+        and node.bbox.height >= 28
+        and node.bbox.width <= max(70.0, node.bbox.height * 1.25)
+    )
 
 
 def _dedupe_preserved_regions(regions: list[SceneNode]) -> list[SceneNode]:
@@ -442,6 +613,8 @@ def _synthesized_bullet_texts(nodes: list[SceneNode], source: Image.Image) -> li
             width=search_right - search_left,
             height=text_node.bbox.height * 0.7,
         )
+        if _has_number_badge_left_of_text(text_node, nodes, search):
+            continue
         bullet_box = _detect_bullet_dot(source, search, text_node.bbox)
         if bullet_box is None:
             continue
@@ -458,6 +631,22 @@ def _synthesized_bullet_texts(nodes: list[SceneNode], source: Image.Image) -> li
             )
         )
     return bullets
+
+
+def _has_number_badge_left_of_text(text_node: SceneNode, nodes: list[SceneNode], search: BBox) -> bool:
+    if _is_large_digit_text_node(text_node):
+        return False
+    for candidate in nodes:
+        if not _is_large_digit_text_node(candidate):
+            continue
+        if candidate.bbox.x >= text_node.bbox.x:
+            continue
+        if _vertical_overlap_ratio(candidate.bbox, text_node.bbox) < 0.18:
+            continue
+        if _horizontal_intersection(candidate.bbox, _expanded_bbox(search, 8.0, 4.0)) <= 0:
+            continue
+        return True
+    return False
 
 
 def _detect_bullet_dot(source: Image.Image, search: BBox, text_bbox: BBox) -> BBox | None:

@@ -247,7 +247,7 @@ class Analyzer:
 
             component_mask = np.zeros_like(residual_mask)
             cv2.drawContours(component_mask, [contour], -1, 255, thickness=cv2.FILLED)
-            if _is_text_only_residual(component_mask, residual_mask, text_mask):
+            if _is_text_only_residual(component_mask, residual_mask, text_mask, bbox):
                 continue
             asset_path = _save_masked_crop_asset(
                 store,
@@ -1001,9 +1001,41 @@ def _hide_text_duplicate_visual_fragments(components: list[Component]) -> None:
         component_area = _bbox_area(component.bbox)
         if component_area > 9000:
             continue
+        if _is_text_backplate_component(component, text_components):
+            continue
         text_overlap = sum(_intersection_area(component.bbox, text.bbox) for text in text_components)
         if text_overlap / max(1.0, component_area) >= 0.48:
             component.hidden = True
+
+
+def _is_text_backplate_component(component: Component, text_components: list[Component]) -> bool:
+    if component.type != "shape":
+        return False
+    overlapping_texts = [
+        text
+        for text in text_components
+        if text.text
+        and _intersection_area(component.bbox, text.bbox) >= _bbox_area(text.bbox) * 0.45
+        and _containment_ratio(text.bbox, _expanded_bbox(component.bbox, 3.0, 3.0)) >= 0.62
+    ]
+    if not overlapping_texts:
+        return False
+    text_box = _bbox_union([text.bbox for text in overlapping_texts])
+    if _bbox_area(component.bbox) < _bbox_area(text_box) * 1.12:
+        return False
+    if any(_is_large_digit_text(text) for text in overlapping_texts):
+        return True
+    return component.bbox.height >= text_box.height * 1.25 or component.bbox.width >= text_box.width * 1.25
+
+
+def _is_large_digit_text(component: Component) -> bool:
+    text = (component.text or "").strip()
+    return (
+        text.isdigit()
+        and len(text) <= 2
+        and component.bbox.height >= 28
+        and component.bbox.width <= max(64.0, component.bbox.height * 1.25)
+    )
 
 
 def _hide_thin_opencv_rule_fragments(components: list[Component]) -> None:
@@ -1443,7 +1475,12 @@ def _paint_claimed_component(mask: np.ndarray, component: Component, image_shape
             mask[y1:y2, x1:x2] = 255
 
 
-def _is_text_only_residual(component_mask: np.ndarray, foreground_mask: np.ndarray, text_mask: np.ndarray) -> bool:
+def _is_text_only_residual(
+    component_mask: np.ndarray,
+    foreground_mask: np.ndarray,
+    text_mask: np.ndarray,
+    bbox: BBox | None = None,
+) -> bool:
     if not np.any(text_mask):
         return False
     component_area = int(np.count_nonzero(component_mask))
@@ -1453,7 +1490,26 @@ def _is_text_only_residual(component_mask: np.ndarray, foreground_mask: np.ndarr
     if text_area == 0:
         return False
     non_text_foreground = int(np.count_nonzero((component_mask > 0) & (foreground_mask > 0) & (text_mask == 0)))
+    if _looks_like_colored_text_backplate(component_area, text_area, non_text_foreground, bbox):
+        return False
     return non_text_foreground < max(20, int(component_area * 0.08))
+
+
+def _looks_like_colored_text_backplate(
+    component_area: int,
+    text_area: int,
+    non_text_foreground: int,
+    bbox: BBox | None,
+) -> bool:
+    if bbox is None or component_area <= 0:
+        return False
+    if bbox.width < 24 or bbox.height < 24:
+        return False
+    if bbox.width > 260 or bbox.height > 180:
+        return False
+    text_ratio = text_area / max(1, component_area)
+    non_text_ratio = non_text_foreground / max(1, component_area)
+    return text_ratio >= 0.45 and non_text_foreground >= 60 and non_text_ratio >= 0.025
 
 
 def _claim_padding(component: Component) -> int:

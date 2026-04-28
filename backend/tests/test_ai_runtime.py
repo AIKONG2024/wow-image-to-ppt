@@ -900,6 +900,58 @@ def test_residual_shape_keeps_colored_label_behind_ocr_text(tmp_path):
     assert label_shape is not None
 
 
+def test_residual_shape_keeps_number_badge_when_ocr_box_covers_fill(tmp_path):
+    image_path = tmp_path / "source.png"
+    image = Image.new("RGB", (420, 940), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([50, 28, 99, 105], fill="#facc15")
+    draw.rectangle([62, 48, 88, 88], fill="black")
+    image.save(image_path)
+
+    store = ProjectStore(Settings(data_dir=tmp_path / "data"))
+    text = Component(
+        id="number-text",
+        type="text",
+        bbox=BBox(x=52, y=36, width=47, height=62),
+        text="2",
+        source="paddleocr",
+    )
+
+    components = Analyzer()._residual_visual_components(
+        image_path,
+        store,
+        "project-test",
+        [text],
+    )
+
+    badge_shape = next(
+        (
+            component
+            for component in components
+            if component.type == "shape"
+            and component.bbox.x <= 52
+            and component.bbox.y <= 30
+            and component.bbox.x + component.bbox.width >= 98
+            and component.bbox.y + component.bbox.height >= 104
+        ),
+        None,
+    )
+    assert badge_shape is not None
+
+
+def test_normalize_keeps_number_badge_shape_behind_digit_text():
+    components = [
+        Component(id="badge", type="shape", bbox=BBox(x=50, y=28, width=50, height=78), source="opencv-residual"),
+        Component(id="digit", type="text", bbox=BBox(x=56, y=38, width=39, height=58), text="5", source="paddleocr"),
+    ]
+
+    normalized = normalize_component_graph(components)
+    by_id = {component.id: component for component in normalized}
+
+    assert by_id["badge"].hidden is False
+    assert by_id["digit"].hidden is False
+
+
 def test_analysis_records_fallback_reasons_when_ai_runtime_missing(monkeypatch, tmp_path):
     monkeypatch.setenv("PPT_AGENT_DISABLE_PADDLEOCR", "1")
     monkeypatch.setenv("PPT_AGENT_DISABLE_SAM3", "1")

@@ -296,6 +296,49 @@ def test_export_places_text_above_synthesized_info_card_shapes(tmp_path):
     assert_text_shapes_are_frontmost(pptx_path)
 
 
+def test_export_uses_consistent_number_badges_for_single_digit_labels(tmp_path):
+    image_path = tmp_path / "number-badges.png"
+    image = Image.new("RGB", (260, 520), "white")
+    draw = ImageDraw.Draw(image)
+    y_positions = [40, 130, 220, 310, 400]
+    text_boxes = [
+        BBox(x=56, y=50, width=30, height=55),
+        BBox(x=50, y=140, width=47, height=62),
+        BBox(x=55, y=230, width=37, height=55),
+        BBox(x=51, y=320, width=45, height=64),
+        BBox(x=52, y=410, width=41, height=59),
+    ]
+    for y in y_positions:
+        draw.rectangle([50, y, 99, y + 77], fill="#facc15")
+    image.save(image_path)
+    project = Project(
+        id="number-badge-export",
+        image_path=str(image_path),
+        width=260,
+        height=520,
+        status="analyzed",
+        components=[
+            Component(id=f"digit-{index}", type="text", bbox=text_boxes[index], text=str(index + 1), source="paddleocr")
+            for index in range(5)
+        ],
+    )
+
+    pptx_path = export_pptx(project, project_store(tmp_path))
+
+    prs = Presentation(str(pptx_path))
+    digit_shapes = [
+        shape
+        for shape in prs.slides[0].shapes
+        if getattr(shape, "has_text_frame", False) and shape.has_text_frame and shape.text.strip() in {"1", "2", "3", "4", "5"}
+    ]
+    font_sizes = [shape.text_frame.paragraphs[0].font.size.pt for shape in digit_shapes]
+    assert len(digit_shapes) == 5
+    assert max(font_sizes) - min(font_sizes) <= 0.1
+    with zipfile.ZipFile(pptx_path) as package:
+        xml = package.read("ppt/slides/slide1.xml").decode("utf-8")
+    assert xml.count('<a:srgbClr val="FACC15"/>') >= 5
+
+
 def test_export_uses_source_crop_for_chart_assets_to_keep_annotations(tmp_path):
     image_path = tmp_path / "chart-source.png"
     image = Image.new("RGB", (140, 90), "white")

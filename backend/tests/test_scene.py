@@ -252,6 +252,72 @@ def test_scene_graph_keeps_dense_icon_text_list_editable(tmp_path):
     assert len(rect_nodes) == 4
 
 
+def test_scene_graph_synthesizes_consistent_number_badges_from_source(tmp_path):
+    image_path = tmp_path / "number-badges.png"
+    image = Image.new("RGB", (260, 520), "white")
+    draw = ImageDraw.Draw(image)
+    y_positions = [40, 130, 220, 310, 400]
+    text_boxes = [
+        BBox(x=56, y=50, width=30, height=55),
+        BBox(x=50, y=140, width=47, height=62),
+        BBox(x=55, y=230, width=37, height=55),
+        BBox(x=51, y=320, width=45, height=64),
+        BBox(x=52, y=410, width=41, height=59),
+    ]
+    for y in y_positions:
+        draw.rectangle([50, y, 99, y + 77], fill="#facc15")
+    image.save(image_path)
+    project = Project(
+        id="scene-number-badges",
+        image_path=str(image_path),
+        width=260,
+        height=520,
+        components=[
+            Component(id=f"digit-{index}", type="text", bbox=text_boxes[index], text=str(index + 1), source="paddleocr")
+            for index in range(5)
+        ],
+    )
+
+    with Image.open(image_path).convert("RGBA") as source:
+        scene = build_scene_graph(project, source)
+
+    badge_rects = [
+        node
+        for node in scene.nodes
+        if node.kind == "rect" and node.fill_color and node.fill_color.upper().startswith("FA")
+    ]
+    digit_nodes = [node for node in scene.nodes if node.kind == "text" and node.text in {"1", "2", "3", "4", "5"}]
+
+    assert len(badge_rects) == 5
+    assert len(digit_nodes) == 5
+    assert {round(node.bbox.width) for node in digit_nodes} == {50}
+    assert {round(node.bbox.height) for node in digit_nodes} == {78}
+
+
+def test_scene_graph_does_not_synthesize_bullets_from_number_badges(tmp_path):
+    image_path = tmp_path / "number-badge-body.png"
+    image = Image.new("RGB", (320, 140), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([50, 30, 99, 107], fill="#facc15")
+    draw.rectangle([68, 54, 81, 92], fill="black")
+    image.save(image_path)
+    project = Project(
+        id="scene-number-badge-body",
+        image_path=str(image_path),
+        width=320,
+        height=140,
+        components=[
+            Component(id="digit", type="text", bbox=BBox(x=56, y=42, width=30, height=55), text="1", source="paddleocr"),
+            Component(id="body", type="text", bbox=BBox(x=150, y=64, width=120, height=20), text="Body copy", source="paddleocr"),
+        ],
+    )
+
+    with Image.open(image_path).convert("RGBA") as source:
+        scene = build_scene_graph(project, source)
+
+    assert not [node for node in scene.nodes if node.kind == "text" and node.text == "•"]
+
+
 def test_scene_graph_removes_redundant_header_subimage(tmp_path):
     image_path = tmp_path / "slide.png"
     image = Image.new("RGB", (220, 120), "white")
