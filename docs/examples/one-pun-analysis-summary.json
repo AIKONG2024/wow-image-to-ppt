@@ -1,0 +1,58 @@
+{
+  "project_id": "a4ddbfb4dff847878dc423c30aeb93aa",
+  "runtime": {
+    "paddleocr": {
+      "available": true,
+      "python": ".venv-ocr\\Scripts\\python.exe",
+      "worker_available": true,
+      "ready": true,
+      "mode": "subprocess"
+    },
+    "paddle": {
+      "available": true,
+      "worker_available": true
+    },
+    "sam3": {
+      "available": false,
+      "ready": false,
+      "hf_token_present": false
+    },
+    "torch": {
+      "available": true,
+      "cuda_available": false,
+      "version": "2.7.1+cpu",
+      "device": null
+    },
+    "hf": {
+      "token_present": false
+    },
+    "issues": [
+      "SAM3 package is missing; visual components use OpenCV fallback."
+    ],
+    "analysis_mode": "opencv-fallback"
+  },
+  "components_visible": 55,
+  "component_types": {
+    "chart": 3,
+    "text": 42,
+    "shape": 5,
+    "icon": 5
+  },
+  "scene_nodes": 63,
+  "scene_node_types": {
+    "rect": 10,
+    "image": 8,
+    "text": 45
+  },
+  "files": {
+    "input": "docs/examples/one-pun-input.png",
+    "components_overlay": "docs/examples/one-pun-components.png",
+    "scene_svg": "docs/examples/one-pun-scene.svg",
+    "scene_png": "docs/examples/one-pun-scene.png",
+    "pptx": "docs/examples/one-pun-editable.pptx"
+  },
+  "analysis_notes": [
+    "SAM3 package is missing; semantic visual segmentation was skipped.",
+    "SAM3 result is unavailable; visual components were detected with OpenCV fallback."
+  ]
+}

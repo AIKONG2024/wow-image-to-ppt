@@ -400,6 +400,7 @@ def normalize_component_graph(components: list[Component]) -> list[Component]:
         for component in components
         if not component.source.startswith("synthetic-")
     ]
+    _hide_page_scale_visual_parents(normalized)
     _hide_oversized_chart_parents(normalized)
     _synthesize_chart_panel_shapes(normalized)
     _expand_charts_to_nearby_annotations(normalized)
@@ -410,6 +411,36 @@ def normalize_component_graph(components: list[Component]) -> list[Component]:
     _synthesize_frame_shapes(normalized)
     _synthesize_info_card_shapes(normalized)
     return normalized
+
+
+def _hide_page_scale_visual_parents(components: list[Component]) -> None:
+    if len(components) < 4:
+        return
+    envelope = _bbox_union([component.bbox for component in components])
+    envelope_area = _bbox_area(envelope)
+    if envelope_area <= 0:
+        return
+    for parent in components:
+        if parent.hidden:
+            continue
+        if parent.type not in {"chart", "table", "image", "shape", "unknown"}:
+            continue
+        if not parent.source.startswith("opencv"):
+            continue
+        if _bbox_area(parent.bbox) < envelope_area * 0.78:
+            continue
+        contained = [
+            child
+            for child in components
+            if child.id != parent.id
+            and not child.hidden
+            and _containment_ratio(child.bbox, parent.bbox) >= 0.62
+        ]
+        text_count = sum(1 for child in contained if child.type == "text")
+        visual_count = sum(1 for child in contained if child.type in {"shape", "icon", "image", "chart", "table", "diagram"})
+        if len(contained) >= 6 and text_count >= 3 and visual_count >= 1:
+            parent.hidden = True
+            parent.source = f"{parent.source}-page-scale-parent"
 
 
 def _refine_chart_component_bboxes(image_path: Path, components: list[Component]) -> None:
@@ -608,6 +639,7 @@ def _synthesize_chart_panel_shapes(components: list[Component]) -> None:
         component
         for component in components
         if component.hidden and component.type in {"chart", "table"} and _bbox_area(component.bbox) >= 1800
+        and not component.source.endswith("-page-scale-parent")
     ]
     visible_charts = [
         component
@@ -858,6 +890,7 @@ def _expand_charts_to_nearby_annotations(components: list[Component]) -> None:
         component
         for component in components
         if component.hidden and component.type in {"chart", "table"} and _bbox_area(component.bbox) >= 800
+        and not component.source.endswith("-page-scale-parent")
     ]
     for chart in charts:
         parent = _smallest_hidden_parent(chart, hidden_parents)

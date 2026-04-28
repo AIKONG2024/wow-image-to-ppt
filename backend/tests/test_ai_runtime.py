@@ -35,8 +35,8 @@ def install_fake_module(monkeypatch, name, module):
 
 
 def test_ai_cache_overrides_user_home_for_paddle(monkeypatch):
-    monkeypatch.setenv("HOME", r"C:\Users\ust21")
-    monkeypatch.setenv("USERPROFILE", r"C:\Users\ust21")
+    monkeypatch.setenv("HOME", r"C:\Users\Example")
+    monkeypatch.setenv("USERPROFILE", r"C:\Users\Example")
 
     _ensure_local_ai_cache()
 
