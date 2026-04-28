@@ -4,19 +4,19 @@
 
 Duct Tape(GPT-Image2), Nano Banana(나노바나나) 등으로 생성한 슬라이드 이미지를 웹에서 업로드하면 화면 요소를 컴포넌트로 나누고 편집 가능한 PPTX로 내보내는 웹 툴입니다.
 
-## Example
+## 예시
 
-Input slide image:
+입력 슬라이드 이미지:
 
-![Input slide](docs/examples/one-pun-input.png)
+![입력 슬라이드 이미지](docs/examples/one-pun-input.png)
 
-Detected components:
+감지된 컴포넌트:
 
-![Detected components](docs/examples/one-pun-components.png)
+![감지된 컴포넌트](docs/examples/one-pun-components.png)
 
-Reconstructed editable scene preview:
+재구성된 편집 가능 장면 미리보기:
 
-![Reconstructed scene](docs/examples/one-pun-scene.png)
+![재구성된 장면 미리보기](docs/examples/one-pun-scene.png)
 
 ## 사용 방법
 
