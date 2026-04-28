@@ -2,6 +2,8 @@
 
 이미지 슬라이드를 웹에서 업로드하면 화면 요소를 컴포넌트로 나누고 편집 가능한 PPTX로 내보내는 웹서비스입니다.
 
+English README: [README_EN.md](README_EN.md)
+
 ## Example
 
 Input slide image:
