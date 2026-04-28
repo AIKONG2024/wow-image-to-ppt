@@ -2,9 +2,10 @@ import zipfile
 
 from PIL import Image, ImageDraw
 from pptx import Presentation
-from pptx.enum.shapes import MSO_SHAPE_TYPE
+from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE, MSO_SHAPE_TYPE
+from pptx.util import Inches
 
-from app.exporter import export_pptx
+from app.exporter import _bring_text_shapes_to_front, export_pptx
 from app.models import BBox, Component, Project
 from app.settings import Settings
 from app.storage import ProjectStore
@@ -41,6 +42,41 @@ def media_images(pptx_path):
             with package.open(name) as handle:
                 images.append(Image.open(handle).convert("RGBA").copy())
     return images
+
+
+def non_empty_text_order(pptx_path):
+    prs = Presentation(str(pptx_path))
+    order = []
+    for index, shape in enumerate(prs.slides[0].shapes):
+        text = ""
+        if getattr(shape, "has_text_frame", False) and shape.has_text_frame:
+            text = shape.text.strip()
+        order.append((index, bool(text), str(shape.shape_type), text))
+    return order
+
+
+def assert_text_shapes_are_frontmost(pptx_path):
+    order = non_empty_text_order(pptx_path)
+    first_text = min((index for index, has_text, _, _ in order if has_text), default=None)
+    last_visual = max((index for index, has_text, _, _ in order if not has_text), default=None)
+    assert first_text is not None
+    assert last_visual is not None
+    assert first_text > last_visual
+
+
+def test_bring_text_shapes_to_front_moves_existing_text_after_later_shapes():
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    textbox = slide.shapes.add_textbox(Inches(0.2), Inches(0.2), Inches(2.0), Inches(0.4))
+    textbox.text_frame.paragraphs[0].text = "Front text"
+    slide.shapes.add_shape(MSO_AUTO_SHAPE_TYPE.RECTANGLE, Inches(0.1), Inches(0.1), Inches(3.0), Inches(0.8))
+
+    assert not slide.shapes[-1].has_text_frame or slide.shapes[-1].text != "Front text"
+
+    _bring_text_shapes_to_front(slide)
+
+    assert slide.shapes[-1].has_text_frame
+    assert slide.shapes[-1].text == "Front text"
 
 
 def test_export_reconstructs_slide_even_when_analysis_only_has_text(tmp_path):
@@ -204,6 +240,60 @@ def test_export_preserves_chart_pixels_under_editable_text(tmp_path):
     pictures = media_images(pptx_path)
     assert len(pictures) == 1
     assert pictures[0].getpixel((25, 20))[:3] == (0, 0, 0)
+    assert_text_shapes_are_frontmost(pptx_path)
+
+
+def test_export_places_text_above_complex_backplate_picture(tmp_path):
+    image_path = tmp_path / "complex-backplate.png"
+    image = Image.new("RGB", (420, 140), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([24, 58, 390, 118], fill="#fdfdfd", outline="#bd110d", width=2)
+    draw.polygon([(24, 58), (160, 58), (140, 118), (24, 118)], fill="#d71920")
+    draw.rectangle([52, 72, 138, 100], fill="white")
+    draw.rectangle([190, 78, 330, 94], fill="black")
+    image.save(image_path)
+    project = Project(
+        id="complex-backplate-export",
+        image_path=str(image_path),
+        width=420,
+        height=140,
+        status="analyzed",
+        components=[
+            Component(id="banner", type="shape", bbox=BBox(x=24, y=58, width=366, height=60), source="opencv-residual"),
+            Component(id="label", type="text", bbox=BBox(x=52, y=72, width=86, height=28), text="KEY TAKEAWAY", source="paddleocr"),
+            Component(id="body", type="text", bbox=BBox(x=190, y=78, width=140, height=16), text="Editable summary", source="paddleocr"),
+        ],
+    )
+
+    pptx_path = export_pptx(project, project_store(tmp_path))
+
+    assert_text_shapes_are_frontmost(pptx_path)
+
+
+def test_export_places_text_above_synthesized_info_card_shapes(tmp_path):
+    image_path = tmp_path / "info-cards.png"
+    image = Image.new("RGB", (360, 180), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([40, 92, 88, 138], fill="#fff8f5", outline="#d13a1a", width=2)
+    draw.text((104, 96), "Strength", fill="#111111")
+    draw.text((104, 118), "Event count", fill="#111111")
+    image.save(image_path)
+    project = Project(
+        id="info-card-export",
+        image_path=str(image_path),
+        width=360,
+        height=180,
+        status="analyzed",
+        components=[
+            Component(id="icon-card", type="shape", bbox=BBox(x=40, y=92, width=48, height=46), source="opencv-residual"),
+            Component(id="title", type="text", bbox=BBox(x=104, y=96, width=80, height=18), text="Strength", source="paddleocr"),
+            Component(id="body", type="text", bbox=BBox(x=104, y=118, width=92, height=18), text="Event count", source="paddleocr"),
+        ],
+    )
+
+    pptx_path = export_pptx(project, project_store(tmp_path))
+
+    assert_text_shapes_are_frontmost(pptx_path)
 
 
 def test_export_uses_source_crop_for_chart_assets_to_keep_annotations(tmp_path):
@@ -312,10 +402,7 @@ def test_export_places_text_above_synthesized_background_shapes(tmp_path):
 
     pptx_path = export_pptx(project, project_store(tmp_path))
 
-    prs = Presentation(str(pptx_path))
-    slide = prs.slides[0]
-    assert slide.shapes[-1].has_text_frame
-    assert slide.shapes[-1].text == "Editable label"
+    assert_text_shapes_are_frontmost(pptx_path)
 
 
 def test_export_writes_arrow_component_as_connector_not_picture(tmp_path):

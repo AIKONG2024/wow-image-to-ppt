@@ -47,6 +47,7 @@ def export_pptx(project: Project, store: ProjectStore) -> Path:
         elif node.kind == "image":
             _add_picture(slide, source, node, x, y, width, height)
 
+    _bring_text_shapes_to_front(slide)
     prs.save(output_path)
     return output_path
 
@@ -164,6 +165,19 @@ def _add_pil_picture(slide, image: Image.Image, x: float, y: float, width: float
     image.save(stream, format="PNG")
     stream.seek(0)
     slide.shapes.add_picture(stream, Inches(x), Inches(y), width=Inches(width), height=Inches(height))
+
+
+def _bring_text_shapes_to_front(slide) -> None:
+    text_elements = []
+    for shape in slide.shapes:
+        if not getattr(shape, "has_text_frame", False) or not shape.has_text_frame:
+            continue
+        if not shape.text.strip():
+            continue
+        text_elements.append(shape._element)
+    for element in text_elements:
+        slide.shapes._spTree.remove(element)
+        slide.shapes._spTree.append(element)
 
 
 def _apply_mask(crop: Image.Image, mask_path: Path, primitive: SceneNode) -> Image.Image:
