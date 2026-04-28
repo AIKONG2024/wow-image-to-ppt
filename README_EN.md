@@ -2,7 +2,7 @@
 
 # WOW Image to PPT
 
-A web service that uploads slide images, splits visual elements into components, and exports them as editable PPTX files.
+A web tool that uploads slide images generated with Duct Tape (GPT-Image2), Nano Banana, or similar image models, separates visual elements into components, and exports them as editable PPTX files.
 
 ## Example
 
@@ -43,7 +43,7 @@ On Windows, you can also run:
 
 ### 2. Create a PPT from the web page
 
-1. Upload a slide image to parse, such as one made with GPT-Image2, Duct Tape, or Nano Banana.
+1. Upload a slide image generated with Duct Tape (GPT-Image2), Nano Banana, or a similar image model.
 2. Click `분석 실행`.
 3. Check the detected components on the screen.
 4. Use `병합`, `분리`, or `제외` if you need to clean up the components.
@@ -56,7 +56,11 @@ SAM3 can split visual elements such as icons, illustrations, charts, and diagram
 ### GPU and Hugging Face Setup
 
 1. Check that your NVIDIA GPU driver and CUDA are installed.
-2. Prepare a Hugging Face token that can access the SAM3 model.
+2. Create a Hugging Face Access Token.
+   - Log in to Hugging Face.
+   - Go to `Settings` → `Access Tokens` → `New token`.
+   - Choose `Read` permission and copy the generated token.
+   - If the SAM3 model page requires approval, request access on the model page first.
 3. Run the commands below.
 
 ```powershell
