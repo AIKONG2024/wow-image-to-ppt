@@ -26,7 +26,49 @@ const labels = {
   unknown: 'Unknown',
 };
 
+const uiText = {
+  ko: {
+    tagline: '슬라이드 이미지를 편집 가능한 PPT 컴포넌트로 변환합니다.',
+    uploadImage: '이미지 업로드',
+    imageUploaded: '이미지가 업로드되었습니다.',
+    analyzeComplete: (count, noteCount) => `분석 완료: ${count}개 컴포넌트${noteCount ? ` · notes ${noteCount}` : ''}`,
+    graphUpdated: '컴포넌트 그래프가 갱신되었습니다.',
+    exportDone: 'PPTX export가 완료되었습니다.',
+    analyze: '분석 실행',
+    merge: '병합',
+    drawSplit: '분리 영역 그리기',
+    applySplit: '분리 적용',
+    exclude: '제외',
+    status: '상태',
+    waiting: '대기 중',
+    visibleCount: (count) => `${count}개 표시 컴포넌트`,
+    selectedCount: (count) => `${count}개 선택됨`,
+    emptyTitle: '이미지를 업로드하세요',
+    emptyHelp: '분석 후 컴포넌트를 병합, 분리, 제외할 수 있습니다.',
+  },
+  en: {
+    tagline: 'Convert slide images into editable PowerPoint components.',
+    uploadImage: 'Upload image',
+    imageUploaded: 'Image uploaded.',
+    analyzeComplete: (count, noteCount) => `Analysis complete: ${count} components${noteCount ? ` · notes ${noteCount}` : ''}`,
+    graphUpdated: 'Component graph updated.',
+    exportDone: 'PPTX export complete.',
+    analyze: 'Run analysis',
+    merge: 'Merge',
+    drawSplit: 'Draw split area',
+    applySplit: 'Apply split',
+    exclude: 'Exclude',
+    status: 'Status',
+    waiting: 'Waiting',
+    visibleCount: (count) => `${count} visible components`,
+    selectedCount: (count) => `${count} selected`,
+    emptyTitle: 'Upload an image',
+    emptyHelp: 'After analysis, select components to merge, split, or exclude.',
+  },
+};
+
 function App() {
+  const [language, setLanguage] = useState(() => localStorage.getItem('wow-image-to-ppt-language') || 'ko');
   const [runtime, setRuntime] = useState(null);
   const [project, setProject] = useState(null);
   const [selected, setSelected] = useState([]);
@@ -39,10 +81,15 @@ function App() {
   const [viewMode, setViewMode] = useState('overlay');
   const stageRef = useRef(null);
   const suppressClickRef = useRef(false);
+  const t = uiText[language] ?? uiText.ko;
 
   useEffect(() => {
     api('/api/runtime').then(setRuntime).catch((error) => setMessage(error.message));
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem('wow-image-to-ppt-language', language);
+  }, [language]);
 
   const visible = useMemo(() => (project?.components ?? []).filter((item) => !item.hidden), [project]);
   const orderedVisible = useMemo(() => [...visible].sort(componentDrawOrder), [visible]);
@@ -71,7 +118,7 @@ function App() {
       setSelected([]);
       setSplitBoxes([]);
       setSelectionDraft(null);
-      setMessage('이미지가 업로드되었습니다.');
+      setMessage(t.imageUploaded);
     });
   }
 
@@ -82,8 +129,7 @@ function App() {
       setProject(next);
       setSelected([]);
       setSelectionDraft(null);
-      const noteSuffix = next.analysis_notes?.length ? ` · notes ${next.analysis_notes.length}` : '';
-      setMessage(`분석 완료: ${next.components.length}개 컴포넌트${noteSuffix}`);
+      setMessage(t.analyzeComplete(next.components.length, next.analysis_notes?.length ?? 0));
     });
   }
 
@@ -97,7 +143,7 @@ function App() {
       setProject(next);
       setSelected([]);
       setSelectionDraft(null);
-      setMessage('컴포넌트 그래프가 갱신되었습니다.');
+      setMessage(t.graphUpdated);
     });
   }
 
@@ -115,7 +161,7 @@ function App() {
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-      setMessage('PPTX export가 완료되었습니다.');
+      setMessage(t.exportDone);
     });
   }
 
@@ -213,34 +259,50 @@ function App() {
   return h('main', { className: 'appShell' }, [
     h('header', { className: 'topbar', key: 'topbar' }, [
       h('div', { key: 'title' }, [
-        h('h1', { key: 'h1' }, 'PPT Agent Studio'),
-        h('p', { key: 'p' }, '한국어 보고서 슬라이드를 editable PPT 컴포넌트로 변환합니다.'),
+        h('h1', { key: 'h1' }, 'WOW Image to PPT'),
+        h('p', { key: 'p' }, t.tagline),
       ]),
-      h('div', { className: 'runtime', key: 'runtime' }, [
-        h('span', { className: samReady ? 'ok' : 'warn', key: 'sam', title: runtimeIssues.join('\n') }, `SAM3 ${samReady ? 'ready' : 'fallback'}`),
-        h('span', { className: ocrReady ? 'ok' : 'warn', key: 'ocr', title: runtimeIssues.join('\n') }, `PaddleOCR ${ocrReady ? 'ready' : 'missing'}`),
+      h('div', { className: 'topbarActions', key: 'actions' }, [
+        h('div', { className: 'segmented languageSwitch', role: 'group', 'aria-label': 'language', key: 'language' }, [
+          h('button', {
+            key: 'ko',
+            type: 'button',
+            className: language === 'ko' ? 'active' : '',
+            onClick: () => setLanguage('ko'),
+          }, '한국어'),
+          h('button', {
+            key: 'en',
+            type: 'button',
+            className: language === 'en' ? 'active' : '',
+            onClick: () => setLanguage('en'),
+          }, 'EN'),
+        ]),
+        h('div', { className: 'runtime', key: 'runtime' }, [
+          h('span', { className: samReady ? 'ok' : 'warn', key: 'sam', title: runtimeIssues.join('\n') }, `SAM3 ${samReady ? 'ready' : 'fallback'}`),
+          h('span', { className: ocrReady ? 'ok' : 'warn', key: 'ocr', title: runtimeIssues.join('\n') }, `PaddleOCR ${ocrReady ? 'ready' : 'missing'}`),
+        ]),
       ]),
     ]),
     h('section', { className: 'workspace', key: 'workspace' }, [
       h('aside', { className: 'sidebar', key: 'sidebar' }, [
         h('label', { className: 'uploadButton', key: 'upload' }, [
           h(Upload, { size: 18, key: 'icon' }),
-          h('span', { key: 'span' }, '이미지 업로드'),
+          h('span', { key: 'span' }, t.uploadImage),
           h('input', { key: 'input', type: 'file', accept: 'image/*', onChange: uploadFile }),
         ]),
-        actionButton(WandSparkles, '분석 실행', !project || busy, analyze),
-        actionButton(Merge, '병합', selected.length < 2 || busy, () => patch({ operation: 'merge', component_ids: selected })),
-        actionButton(SplitSquareHorizontal, '분리 영역 그리기', selected.length !== 1 || busy, () => setSplitMode(!splitMode), splitMode),
-        actionButton(Scissors, '분리 적용', !splitMode || splitBoxes.length === 0 || busy, () => patch({ operation: 'split', component_ids: selected, boxes: splitBoxes })),
-        actionButton(EyeOff, '제외', selected.length === 0 || busy, () => patch({ operation: 'delete', component_ids: selected })),
+        actionButton(WandSparkles, t.analyze, !project || busy, analyze),
+        actionButton(Merge, t.merge, selected.length < 2 || busy, () => patch({ operation: 'merge', component_ids: selected })),
+        actionButton(SplitSquareHorizontal, t.drawSplit, selected.length !== 1 || busy, () => setSplitMode(!splitMode), splitMode),
+        actionButton(Scissors, t.applySplit, !splitMode || splitBoxes.length === 0 || busy, () => patch({ operation: 'split', component_ids: selected, boxes: splitBoxes })),
+        actionButton(EyeOff, t.exclude, selected.length === 0 || busy, () => patch({ operation: 'delete', component_ids: selected })),
         actionButton(FileCode2, 'SVG scene', !project || busy, openSceneSvg),
         actionButton(Download, 'PPTX export', !project || busy, exportPptx),
         h('div', { className: 'statusBlock', key: 'status' }, [
-          h('strong', { key: 'label' }, '상태'),
-          h('span', { key: 'project' }, project?.status ?? '대기 중'),
+          h('strong', { key: 'label' }, t.status),
+          h('span', { key: 'project' }, project?.status ?? t.waiting),
           h('span', { key: 'mode' }, `analysis: ${runtime?.analysis_mode ?? 'checking'}`),
-          h('span', { key: 'count' }, `${visible.length} visible components`),
-          h('span', { key: 'selected' }, `${selected.length} selected`),
+          h('span', { key: 'count' }, t.visibleCount(visible.length)),
+          h('span', { key: 'selected' }, t.selectedCount(selected.length)),
         ]),
         project?.analysis_notes?.length ? h('div', { className: 'notes', key: 'notes' }, project.analysis_notes.map((note, index) =>
           h('span', { key: index }, note),
@@ -309,8 +371,8 @@ function App() {
         ])
         : h('div', { className: 'emptyState' }, [
             h(Layers, { size: 42, key: 'icon' }),
-            h('strong', { key: 'strong' }, '이미지를 업로드하세요'),
-            h('span', { key: 'span' }, '분석 후 컴포넌트를 병합, 분리, 제외할 수 있습니다.'),
+            h('strong', { key: 'strong' }, t.emptyTitle),
+            h('span', { key: 'span' }, t.emptyHelp),
           ])),
     ]),
   ]);

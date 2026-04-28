@@ -24,7 +24,51 @@ const typeLabels = {
   unknown: 'Unknown',
 };
 
+const uiText = {
+  ko: {
+    tagline: '슬라이드 이미지를 편집 가능한 PPT 컴포넌트로 변환합니다.',
+    uploadImage: '이미지 업로드',
+    imageUploaded: '이미지가 업로드되었습니다.',
+    analyzeComplete: (count, noteCount) => `분석 완료: ${count}개 컴포넌트${noteCount ? ` · notes ${noteCount}` : ''}`,
+    graphUpdated: '컴포넌트 그래프가 갱신되었습니다.',
+    exportDone: 'PPTX export가 완료되었습니다.',
+    analyze: '분석 실행',
+    merge: '병합',
+    drawSplit: '분리 영역 그리기',
+    applySplit: '분리 적용',
+    exclude: '제외',
+    status: '상태',
+    waiting: '대기 중',
+    visibleCount: (count) => `${count}개 표시 컴포넌트`,
+    selectedCount: (count) => `${count}개 선택됨`,
+    emptyTitle: '이미지를 업로드하세요',
+    emptyHelp: '분석 후 컴포넌트를 선택해 병합, 분리, 제외할 수 있습니다.',
+    componentList: '컴포넌트',
+  },
+  en: {
+    tagline: 'Convert slide images into editable PowerPoint components.',
+    uploadImage: 'Upload image',
+    imageUploaded: 'Image uploaded.',
+    analyzeComplete: (count, noteCount) => `Analysis complete: ${count} components${noteCount ? ` · notes ${noteCount}` : ''}`,
+    graphUpdated: 'Component graph updated.',
+    exportDone: 'PPTX export complete.',
+    analyze: 'Run analysis',
+    merge: 'Merge',
+    drawSplit: 'Draw split area',
+    applySplit: 'Apply split',
+    exclude: 'Exclude',
+    status: 'Status',
+    waiting: 'Waiting',
+    visibleCount: (count) => `${count} visible components`,
+    selectedCount: (count) => `${count} selected`,
+    emptyTitle: 'Upload an image',
+    emptyHelp: 'After analysis, select components to merge, split, or exclude.',
+    componentList: 'Components',
+  },
+};
+
 export function App() {
+  const [language, setLanguage] = useState(() => localStorage.getItem('wow-image-to-ppt-language') || 'ko');
   const [runtime, setRuntime] = useState(null);
   const [project, setProject] = useState(null);
   const [selected, setSelected] = useState([]);
@@ -35,10 +79,15 @@ export function App() {
   const [draftBox, setDraftBox] = useState(null);
   const [viewMode, setViewMode] = useState('overlay');
   const stageRef = useRef(null);
+  const t = uiText[language] ?? uiText.ko;
 
   useEffect(() => {
     getRuntime().then(setRuntime).catch((error) => setMessage(error.message));
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem('wow-image-to-ppt-language', language);
+  }, [language]);
 
   const visibleComponents = useMemo(
     () => (project?.components ?? []).filter((component) => !component.hidden),
@@ -62,7 +111,7 @@ export function App() {
       setProject(nextProject);
       setSelected([]);
       setSplitBoxes([]);
-      setMessage('이미지가 업로드되었습니다.');
+      setMessage(t.imageUploaded);
     });
   }
 
@@ -72,8 +121,7 @@ export function App() {
       const nextProject = await analyzeProject(project.id);
       setProject(nextProject);
       setSelected([]);
-      const noteSuffix = nextProject.analysis_notes?.length ? ` · notes ${nextProject.analysis_notes.length}` : '';
-      setMessage(`분석 완료: ${nextProject.components.length}개 컴포넌트${noteSuffix}`);
+      setMessage(t.analyzeComplete(nextProject.components.length, nextProject.analysis_notes?.length ?? 0));
     });
   }
 
@@ -99,7 +147,7 @@ export function App() {
       const nextProject = await patchComponents(project.id, payload);
       setProject(nextProject);
       setSelected([]);
-      setMessage('컴포넌트 그래프가 갱신되었습니다.');
+      setMessage(t.graphUpdated);
     });
   }
 
@@ -115,7 +163,7 @@ export function App() {
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-      setMessage('PPTX export가 완료되었습니다.');
+      setMessage(t.exportDone);
     });
   }
 
@@ -179,27 +227,45 @@ export function App() {
     <main className="appShell">
       <header className="topbar">
         <div>
-          <h1>PPT Agent Studio</h1>
-          <p>한국어 보고서 슬라이드를 editable PPT 컴포넌트로 변환합니다.</p>
+          <h1>WOW Image to PPT</h1>
+          <p>{t.tagline}</p>
         </div>
-        <RuntimeStatus runtime={runtime} />
+        <div className="topbarActions">
+          <div className="segmented languageSwitch" role="group" aria-label="language">
+            <button
+              type="button"
+              className={language === 'ko' ? 'active' : ''}
+              onClick={() => setLanguage('ko')}
+            >
+              한국어
+            </button>
+            <button
+              type="button"
+              className={language === 'en' ? 'active' : ''}
+              onClick={() => setLanguage('en')}
+            >
+              EN
+            </button>
+          </div>
+          <RuntimeStatus runtime={runtime} />
+        </div>
       </header>
 
       <section className="workspace">
         <aside className="sidebar">
           <label className="uploadButton">
             <Upload size={18} />
-            <span>이미지 업로드</span>
+            <span>{t.uploadImage}</span>
             <input type="file" accept="image/*" onChange={handleUpload} />
           </label>
 
           <button disabled={!project || busy} onClick={handleAnalyze}>
             <WandSparkles size={18} />
-            분석 실행
+            {t.analyze}
           </button>
           <button disabled={selected.length < 2 || busy} onClick={handleMerge}>
             <Merge size={18} />
-            병합
+            {t.merge}
           </button>
           <button
             disabled={selected.length !== 1 || busy}
@@ -207,15 +273,15 @@ export function App() {
             onClick={() => setSplitMode((value) => !value)}
           >
             <SplitSquareHorizontal size={18} />
-            분리 영역 그리기
+            {t.drawSplit}
           </button>
           <button disabled={!splitMode || splitBoxes.length === 0 || busy} onClick={handleApplySplit}>
             <Scissors size={18} />
-            분리 적용
+            {t.applySplit}
           </button>
           <button disabled={selected.length === 0 || busy} onClick={handleDelete}>
             <EyeOff size={18} />
-            제외
+            {t.exclude}
           </button>
           <button disabled={!project || busy} onClick={handleExport}>
             <Download size={18} />
@@ -223,11 +289,11 @@ export function App() {
           </button>
 
           <div className="statusBlock">
-            <strong>상태</strong>
-            <span>{project?.status ?? '대기 중'}</span>
+            <strong>{t.status}</strong>
+            <span>{project?.status ?? t.waiting}</span>
             <span>analysis: {runtime?.analysis_mode ?? 'checking'}</span>
-            <span>{visibleComponents.length} visible components</span>
-            <span>{selectedComponents.length} selected</span>
+            <span>{t.visibleCount(visibleComponents.length)}</span>
+            <span>{t.selectedCount(selectedComponents.length)}</span>
           </div>
 
           {project?.analysis_notes?.length ? (
@@ -244,6 +310,7 @@ export function App() {
             components={visibleComponents}
             selected={selected}
             onSelect={toggleSelect}
+            title={t.componentList}
           />
         </aside>
 
@@ -251,8 +318,8 @@ export function App() {
           {!project && (
             <div className="emptyState">
               <Layers size={42} />
-              <strong>이미지를 업로드하세요</strong>
-              <span>분석 후 컴포넌트를 선택해 병합, 분리, 제외할 수 있습니다.</span>
+              <strong>{t.emptyTitle}</strong>
+              <span>{t.emptyHelp}</span>
             </div>
           )}
           {project && (
@@ -368,12 +435,12 @@ function RuntimeStatus({ runtime }) {
   );
 }
 
-function ComponentList({ components, selected, onSelect }) {
+function ComponentList({ components, selected, onSelect, title }) {
   return (
     <div className="componentList">
       <div className="listHeader">
         <MousePointer2 size={15} />
-        <span>컴포넌트</span>
+        <span>{title}</span>
       </div>
       {components.map((component) => (
         <button

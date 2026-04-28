@@ -33,3 +33,25 @@ def test_react_ui_has_exploded_component_inspection_view():
     assert "function componentInspectionOrder" in app_source
     assert ".explodedGrid" in css_source
     assert ".componentCard" in css_source
+
+
+def test_ui_has_korean_english_language_switch():
+    sources = [
+        Path("backend/static/app.js").read_text(encoding="utf-8"),
+        Path("frontend/src/App.jsx").read_text(encoding="utf-8"),
+    ]
+    styles = [
+        Path("backend/static/base.css").read_text(encoding="utf-8"),
+        Path("frontend/src/styles.css").read_text(encoding="utf-8"),
+    ]
+
+    for source in sources:
+        assert "WOW Image to PPT" in source
+        assert "wow-image-to-ppt-language" in source
+        assert "languageSwitch" in source
+        assert "분석 실행" in source
+        assert "Run analysis" in source
+
+    for css_source in styles:
+        assert ".topbarActions" in css_source
+        assert ".languageSwitch button" in css_source

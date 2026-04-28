@@ -51,6 +51,12 @@ input {
   white-space: nowrap;
 }
 
+.topbarActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .runtime span {
   padding: 5px 9px;
   border-radius: 4px;
@@ -246,6 +252,10 @@ input {
   background: #1d4ed8;
 }
 
+.languageSwitch button {
+  min-width: 72px;
+}
+
 .viewCount {
   color: #64748b;
   font-size: 13px;
@@ -435,6 +445,11 @@ input {
     align-items: flex-start;
     gap: 10px;
     padding: 12px;
+    flex-direction: column;
+  }
+
+  .topbarActions {
+    align-items: flex-start;
     flex-direction: column;
   }
 

@@ -14,9 +14,9 @@ Detected components:
 
 ![Detected components](docs/examples/one-pun-components.png)
 
-Reconstructed editable scene preview:
+Result:
 
-![Reconstructed scene](docs/examples/one-pun-scene.png)
+![Result](docs/examples/one-pun-scene.png)
 
 ## How to Use
 
@@ -35,6 +35,8 @@ Open this address in your browser.
 http://127.0.0.1:8000
 ```
 
+Use the top-right `한국어 | EN` switch to change the UI language.
+
 On Windows, you can also run:
 
 ```powershell
@@ -44,9 +46,9 @@ On Windows, you can also run:
 ### 2. Create a PPT from the web page
 
 1. Upload a slide image generated with Duct Tape (GPT-Image2), Nano Banana, or a similar image model.
-2. Click `분석 실행`.
+2. Click `Run analysis`.
 3. Check the detected components on the screen.
-4. Use `병합`, `분리`, or `제외` if you need to clean up the components.
+4. Use `Merge`, `Draw split area`, `Apply split`, or `Exclude` if you need to clean up the components.
 5. Click `PPTX export` to download the PowerPoint file.
 
 ## SAM3 Gives Better Results
@@ -84,7 +86,7 @@ Use it like this:
 1. Start the server with the basic run command.
 2. Upload an image and run analysis.
 3. Check the automatically detected components.
-4. Fix incorrect components in the web page with `병합`, `분리`, or `제외`.
+4. Fix incorrect components in the web page with `Merge`, `Draw split area`, `Apply split`, or `Exclude`.
 5. Export the result as PPTX.
 
 The basic features work without a GPU or Hugging Face token.
