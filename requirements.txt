@@ -1,0 +1,17 @@
+fastapi
+uvicorn[standard]
+python-multipart
+pillow
+opencv-python==4.10.0.84
+numpy
+python-pptx
+pydantic
+pytest
+httpx
+
+# Optional local AI runtime for production-quality analysis:
+# paddleocr
+# paddlepaddle-gpu
+# torch
+# torchvision
+# sam3
