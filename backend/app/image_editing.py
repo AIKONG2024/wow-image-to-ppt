@@ -16,7 +16,8 @@ def erase_regions(image: Image.Image, image_bbox: BBox, erase_boxes: list[BBox])
             draw.rectangle(region, fill=255)
     if mask.getbbox() is None:
         return image
-    if _mask_coverage(mask) > 0.28:
+    regions = _mask_regions(mask)
+    if _mask_coverage(mask) > 0.28 or _should_fill_mask_regions(image.size, regions):
         return _fill_from_edge_color(image, mask)
     try:
         return _inpaint(image, mask)
@@ -70,8 +71,32 @@ def _mask_coverage(mask: Image.Image) -> float:
 
 
 def _mask_regions(mask: Image.Image) -> list[tuple[int, int, int, int]]:
-    bbox = mask.getbbox()
-    return [bbox] if bbox else []
+    try:
+        import cv2
+        import numpy as np
+
+        labels_count, labels, stats, _ = cv2.connectedComponentsWithStats(np.asarray(mask), connectivity=8)
+        regions: list[tuple[int, int, int, int]] = []
+        for label in range(1, labels_count):
+            x, y, width, height, area = stats[label]
+            if area <= 0:
+                continue
+            regions.append((int(x), int(y), int(x + width), int(y + height)))
+        return regions
+    except Exception:
+        bbox = mask.getbbox()
+        return [bbox] if bbox else []
+
+
+def _should_fill_mask_regions(size: tuple[int, int], regions: list[tuple[int, int, int, int]]) -> bool:
+    width, height = size
+    area = max(1, width * height)
+    for x1, y1, x2, y2 in regions:
+        region_width = max(0, x2 - x1)
+        region_height = max(0, y2 - y1)
+        if y1 <= 2 and region_height >= height * 0.08 and region_width * region_height >= area * 0.035:
+            return True
+    return False
 
 
 def _local_region(size: tuple[int, int], image_bbox: BBox, box: BBox) -> tuple[int, int, int, int] | None:

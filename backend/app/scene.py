@@ -34,6 +34,7 @@ def build_scene_graph(project: Project, source: Image.Image) -> SceneGraph:
     _mark_text_colors(nodes, source)
     nodes = _merge_adjacent_text_line_nodes(nodes)
     nodes = _trim_text_nodes_at_large_side_images(nodes, project.width, project.height)
+    nodes = _remove_large_artwork_text_nodes(nodes)
     _normalize_dark_label_rects(nodes)
     _trim_chart_images_below_overlapping_text_labels(nodes)
     nodes = _preserve_complex_shape_regions(nodes, source)
@@ -63,6 +64,9 @@ def _trim_text_nodes_at_large_side_images(nodes: list[SceneNode], width: int, he
             trimmed.append(node)
             continue
         bbox = node.bbox
+        if _is_latin_display_text(bbox, node.text or ""):
+            trimmed.append(node)
+            continue
         for image_node in side_images:
             if image_node.bbox.x <= bbox.x:
                 continue
@@ -120,6 +124,25 @@ def _is_large_artwork_text_on_side_image(image_node: SceneNode, text_node: Scene
     if text_node.bbox.height < image_node.bbox.height * 0.14:
         return False
     return text_node.bbox.width >= image_node.bbox.width * 0.28
+
+
+def _remove_large_artwork_text_nodes(nodes: list[SceneNode]) -> list[SceneNode]:
+    image_nodes = [node for node in nodes if node.kind == "image"]
+    if not image_nodes:
+        return nodes
+
+    removed: set[str] = set()
+    for text_node in nodes:
+        if text_node.kind != "text" or not text_node.text:
+            continue
+        for image_node in image_nodes:
+            if _containment_ratio(text_node.bbox, image_node.bbox) < 0.72:
+                continue
+            if not _is_large_artwork_text_on_side_image(image_node, text_node):
+                continue
+            removed.add(text_node.id)
+            break
+    return [node for node in nodes if node.id not in removed]
 
 
 def _merge_adjacent_text_line_nodes(nodes: list[SceneNode]) -> list[SceneNode]:
@@ -615,6 +638,8 @@ def _normalize_label_text_boxes_to_backplates(nodes: list[SceneNode]) -> None:
         if not candidates:
             continue
         rect = min(candidates, key=lambda item: _bbox_area(item.bbox))
+        if _is_lettered_section_label_text(text_node.text or "") and text_node.bbox.width >= rect.bbox.width * 0.78:
+            continue
         pad = max(4.0, rect.bbox.height * 0.08)
         x1 = rect.bbox.x + pad
         x2 = rect.bbox.x + rect.bbox.width - pad
@@ -630,6 +655,11 @@ def _is_section_label_text(text: str) -> bool:
         and len(stripped) >= 2
         and (stripped[1] in {")", "]"} or stripped[:3].upper() == "VS.")
     )
+
+
+def _is_lettered_section_label_text(text: str) -> bool:
+    stripped = text.strip()
+    return len(stripped) >= 2 and stripped[0].isalpha() and stripped[1] in {")", "]"}
 
 
 def _trim_chart_images_below_overlapping_text_labels(nodes: list[SceneNode]) -> None:
@@ -669,6 +699,8 @@ def _synthesized_text_background_rects(nodes: list[SceneNode], source: Image.Ima
             continue
         background = _detect_text_background_rect(text_node, source)
         if background is not None:
+            if _is_lettered_section_label_text(text_node.text or "") and _hex_luma(background.fill_color) < 120:
+                text_node.text_color = "FFFFFF"
             rects.append(background)
             existing_rects.append(background)
     return rects
@@ -1029,7 +1061,8 @@ def _text_svg(node: SceneNode) -> str:
     font_style = _svg_text_font_style(bbox, node.text or "")
     y = bbox.y + bbox.height * 0.72
     escaped_text = html.escape(node.text or "")
-    text_fit = f' textLength="{_fmt(bbox.width)}" lengthAdjust="spacingAndGlyphs"' if _is_latin_display_text(bbox, node.text or "") else ""
+    should_fit_text = _is_latin_display_text(bbox, node.text or "") or _is_section_label_text(node.text or "")
+    text_fit = f' textLength="{_fmt(bbox.width)}" lengthAdjust="spacingAndGlyphs"' if should_fit_text else ""
     return (
         f'<text id="{html.escape(node.id)}" {_source_attr(node)} '
         f'x="{_fmt(bbox.x)}" y="{_fmt(y)}"{text_fit} '
@@ -1080,8 +1113,9 @@ def _should_use_source_crop(node: SceneNode) -> bool:
 def _svg_text_font_size(bbox: BBox, text: str) -> float:
     longest = max(text.splitlines() or [text], key=len)
     if _is_section_label_text(text):
-        by_width = bbox.width / max(_text_units(longest, latin_width=0.5), 1.0) * 0.96
-        by_height = bbox.height * 0.78
+        latin_width = 0.62 if _is_lettered_section_label_text(text) else 0.5
+        by_width = bbox.width / max(_text_units(longest, latin_width=latin_width), 1.0) * 0.96
+        by_height = bbox.height * (0.72 if _is_lettered_section_label_text(text) else 0.78)
         return max(10.0, min(72.0, by_width, by_height))
     if _is_latin_display_text(bbox, text):
         by_width = bbox.width / max(_text_units(longest, latin_width=0.36), 1.0) * 0.94
@@ -1093,6 +1127,8 @@ def _svg_text_font_size(bbox: BBox, text: str) -> float:
 
 
 def _svg_text_font_family(bbox: BBox, text: str) -> str:
+    if _is_lettered_section_label_text(text):
+        return "Arial, Calibri, sans-serif"
     if _is_latin_display_text(bbox, text):
         return "Impact, Haettenschweiler, Arial Black, Arial Narrow, sans-serif"
     if _is_latin_text(text):
@@ -1101,7 +1137,7 @@ def _svg_text_font_family(bbox: BBox, text: str) -> str:
 
 
 def _svg_text_font_weight(bbox: BBox, text: str) -> str:
-    if _is_latin_display_text(bbox, text):
+    if _is_latin_display_text(bbox, text) and not _is_lettered_section_label_text(text):
         return "900"
     if _is_short_uppercase_label(text):
         return "700"

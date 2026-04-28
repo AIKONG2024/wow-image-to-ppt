@@ -200,8 +200,9 @@ def _apply_mask(crop: Image.Image, mask_path: Path, primitive: SceneNode) -> Ima
 def _font_size(width: float, height: float, text: str) -> float:
     longest = max(text.splitlines() or [text], key=len)
     if _is_section_label_text(text):
-        by_width = width * 72 / max(_text_units(longest, latin_width=0.5), 1.0) * 0.96
-        by_height = height * 72 * 0.78
+        latin_width = 0.62 if _is_lettered_section_label_text(text) else 0.5
+        by_width = width * 72 / max(_text_units(longest, latin_width=latin_width), 1.0) * 0.96
+        by_height = height * 72 * (0.72 if _is_lettered_section_label_text(text) else 0.78)
         return max(10.0, min(48.0, by_width, by_height))
     if _is_latin_display_text(width, height, text):
         by_width = width * 72 / max(_text_units(longest, latin_width=0.36), 1.0) * 0.96
@@ -213,6 +214,8 @@ def _font_size(width: float, height: float, text: str) -> float:
 
 
 def _font_name(width: float, height: float, text: str) -> str:
+    if _is_lettered_section_label_text(text):
+        return "Arial"
     if _is_latin_display_text(width, height, text):
         return "Impact"
     if _is_latin_text(text):
@@ -221,7 +224,7 @@ def _font_name(width: float, height: float, text: str) -> str:
 
 
 def _font_bold(width: float, height: float, text: str) -> bool:
-    return _is_latin_display_text(width, height, text) or _is_short_uppercase_label(text)
+    return (_is_latin_display_text(width, height, text) and not _is_lettered_section_label_text(text)) or _is_short_uppercase_label(text)
 
 
 def _font_italic(text: str) -> bool:
@@ -271,6 +274,11 @@ def _is_section_label_text(text: str) -> bool:
         and len(stripped) >= 2
         and (stripped[1] in {")", "]"} or stripped[:3].upper() == "VS.")
     )
+
+
+def _is_lettered_section_label_text(text: str) -> bool:
+    stripped = text.strip()
+    return len(stripped) >= 2 and stripped[0].isalpha() and stripped[1] in {")", "]"}
 
 
 def _latin_character_ratio(text: str) -> float:

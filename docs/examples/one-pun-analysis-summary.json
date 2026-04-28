@@ -39,13 +39,13 @@
     "shape": 7,
     "chart": 2
   },
-  "scene_nodes": 82,
+  "scene_nodes": 79,
   "scene_node_types": {
-    "rect": 8,
-    "image": 14,
-    "text": 60
+    "image": 13,
+    "rect": 13,
+    "text": 53
   },
-  "scene_text_nodes": 60,
+  "scene_text_nodes": 53,
   "files": {
     "input": "docs/examples/one-pun-input.png",
     "components_overlay": "docs/examples/one-pun-components.png",
@@ -56,5 +56,7 @@
   "analysis_notes": [
     "SAM3 package is missing; semantic visual segmentation was skipped.",
     "SAM3 result is unavailable; visual components were detected with OpenCV fallback."
-  ]
+  ],
+  "bam_text_nodes": [],
+  "image_erase_box_count": 26
 }

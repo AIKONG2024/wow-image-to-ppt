@@ -130,6 +130,31 @@ def test_scene_graph_does_not_erase_text_that_only_slightly_overlaps_large_image
     assert text_node.bbox.x + text_node.bbox.width <= image_node.bbox.x
 
 
+def test_scene_graph_keeps_large_display_title_over_side_image(tmp_path):
+    image_path = tmp_path / "large-display-title-overlap.png"
+    image = Image.new("RGB", (340, 180), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([190, 0, 340, 180], fill="#d71920")
+    draw.rectangle([20, 8, 222, 84], fill="black")
+    image.save(image_path)
+    project = Project(
+        id="scene-large-display-title-overlap",
+        image_path=str(image_path),
+        width=340,
+        height=180,
+        components=[
+            Component(id="hero-image", type="image", bbox=BBox(x=190, y=0, width=150, height=180), source="opencv-residual"),
+            Component(id="title", type="text", bbox=BBox(x=20, y=8, width=202, height=76), text="Strong Title Here", source="paddleocr"),
+        ],
+    )
+
+    with Image.open(image_path).convert("RGBA") as source:
+        scene = build_scene_graph(project, source)
+
+    text_node = next(node for node in scene.nodes if node.kind == "text")
+    assert text_node.bbox.width == 202
+
+
 def test_scene_graph_keeps_illustration_pixels_under_editable_text(tmp_path):
     image_path = tmp_path / "illustration.png"
     image = Image.new("RGB", (300, 160), "white")
@@ -152,8 +177,7 @@ def test_scene_graph_keeps_illustration_pixels_under_editable_text(tmp_path):
         scene = build_scene_graph(project, source)
 
     image_node = next(node for node in scene.nodes if node.kind == "image")
-    text_node = next(node for node in scene.nodes if node.kind == "text")
-    assert text_node.text == "BAM"
+    assert not [node for node in scene.nodes if node.kind == "text" and node.text == "BAM"]
     assert image_node.erase_boxes == []
 
 
@@ -179,8 +203,7 @@ def test_scene_graph_keeps_huge_stylized_image_text_as_artwork(tmp_path):
         scene = build_scene_graph(project, source)
 
     image_node = next(node for node in scene.nodes if node.kind == "image")
-    text_node = next(node for node in scene.nodes if node.kind == "text")
-    assert text_node.text == "BAM"
+    assert not [node for node in scene.nodes if node.kind == "text" and node.text == "BAM"]
     assert image_node.erase_boxes == []
 
 
@@ -366,6 +389,52 @@ def test_scene_graph_expands_label_text_box_to_colored_backplate(tmp_path):
     label = next(node for node in scene.nodes if node.kind == "text" and node.text == "D) KEY TAKEAWAY")
     assert label.bbox.width > 170
     assert label.bbox.height == 30
+
+
+def test_scene_graph_keeps_wide_section_label_text_box_from_overexpanding(tmp_path):
+    image_path = tmp_path / "wide-label-backplate.png"
+    image = Image.new("RGB", (440, 140), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([140, 48, 408, 104], fill="#bd0f0e")
+    image.save(image_path)
+    project = Project(
+        id="scene-wide-label-backplate",
+        image_path=str(image_path),
+        width=440,
+        height=140,
+        components=[
+            Component(id="label-bg", type="shape", bbox=BBox(x=140, y=48, width=268, height=56), source="opencv-residual"),
+            Component(id="label", type="text", bbox=BBox(x=176, y=54, width=219, height=44), text="D) KEY TAKEAWAY", source="paddleocr"),
+        ],
+    )
+
+    with Image.open(image_path).convert("RGBA") as source:
+        scene = build_scene_graph(project, source)
+
+    label = next(node for node in scene.nodes if node.kind == "text" and node.text == "D) KEY TAKEAWAY")
+    assert label.bbox.x == 176
+    assert label.bbox.width == 219
+
+
+def test_scene_graph_uses_regular_latin_font_for_lettered_section_labels(tmp_path):
+    image_path = tmp_path / "label-font.png"
+    Image.new("RGB", (360, 120), "white").save(image_path)
+    project = Project(
+        id="scene-label-font",
+        image_path=str(image_path),
+        width=360,
+        height=120,
+        components=[
+            Component(id="label", type="text", bbox=BBox(x=40, y=36, width=220, height=52), text="D) KEY TAKEAWAY", source="paddleocr"),
+        ],
+    )
+
+    with Image.open(image_path).convert("RGBA") as source:
+        svg = render_scene_svg(build_scene_graph(project, source), source)
+
+    assert "D) KEY TAKEAWAY" in svg
+    assert "Impact" not in svg
+    assert "textLength=" in svg
 
 
 def test_scene_graph_removes_redundant_header_subimage(tmp_path):
