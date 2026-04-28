@@ -48,7 +48,7 @@ def test_scene_graph_renders_svg_with_native_rect_text_and_embedded_image(tmp_pa
     assert root.attrib["viewBox"] == "0 0 180 100"
 
 
-def test_scene_graph_keeps_header_picture_pixels_under_editable_text(tmp_path):
+def test_scene_graph_erases_header_picture_text_under_editable_text(tmp_path):
     image_path = tmp_path / "slide.png"
     image = Image.new("RGB", (200, 100), "white")
     draw = ImageDraw.Draw(image)
@@ -72,12 +72,12 @@ def test_scene_graph_keeps_header_picture_pixels_under_editable_text(tmp_path):
         svg = render_scene_svg(scene, source)
 
     image_node = next(node for node in scene.nodes if node.kind == "image")
-    assert image_node.erase_boxes == []
+    assert image_node.erase_boxes
     embedded = _first_embedded_png(svg)
-    assert embedded.getpixel((40, 10))[:3] == (0, 0, 0)
+    assert embedded.getpixel((40, 10))[:3] != (0, 0, 0)
 
 
-def test_scene_graph_keeps_chart_picture_pixels_under_editable_text(tmp_path):
+def test_scene_graph_erases_chart_picture_text_under_editable_text(tmp_path):
     image_path = tmp_path / "chart.png"
     image = Image.new("RGB", (200, 120), "white")
     draw = ImageDraw.Draw(image)
@@ -100,7 +100,7 @@ def test_scene_graph_keeps_chart_picture_pixels_under_editable_text(tmp_path):
 
     image_node = next(node for node in scene.nodes if node.kind == "image")
     assert image_node.source_component_type == "chart"
-    assert image_node.erase_boxes == []
+    assert image_node.erase_boxes
 
 
 def test_scene_graph_does_not_erase_text_that_only_slightly_overlaps_large_image(tmp_path):
@@ -212,10 +212,12 @@ def test_scene_graph_keeps_complex_region_text_editable(tmp_path):
     text_nodes = [node for node in scene.nodes if node.kind == "text" and node.text != "•"]
     image_nodes = [node for node in scene.nodes if node.kind == "image"]
     assert [node.text for node in text_nodes] == ["KEY TAKEAWAY", "Editable summary"]
+    assert not [node for node in scene.nodes if node.kind == "text" and node.text == "•"]
     assert image_nodes
+    assert image_nodes[0].erase_boxes
     embedded = _first_embedded_png(svg)
     assert embedded.getpixel((40, 10))[:3] == (215, 25, 32)
-    assert embedded.getpixel((166, 20))[:3] == (0, 0, 0)
+    assert embedded.getpixel((166, 20))[:3] != (0, 0, 0)
 
 
 def test_scene_graph_keeps_dense_icon_text_list_editable(tmp_path):
@@ -316,6 +318,54 @@ def test_scene_graph_does_not_synthesize_bullets_from_number_badges(tmp_path):
         scene = build_scene_graph(project, source)
 
     assert not [node for node in scene.nodes if node.kind == "text" and node.text == "•"]
+
+
+def test_scene_graph_does_not_synthesize_bullets_inside_right_side_table(tmp_path):
+    image_path = tmp_path / "table-cell.png"
+    image = Image.new("RGB", (360, 160), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([180, 40, 340, 120], outline="#d1d5db", width=1)
+    draw.ellipse([198, 66, 204, 72], fill="black")
+    image.save(image_path)
+    project = Project(
+        id="scene-table-cell-no-bullet",
+        image_path=str(image_path),
+        width=360,
+        height=160,
+        components=[
+            Component(id="cell-text", type="text", bbox=BBox(x=250, y=58, width=70, height=22), text="Cell text", source="paddleocr"),
+        ],
+    )
+
+    with Image.open(image_path).convert("RGBA") as source:
+        scene = build_scene_graph(project, source)
+
+    assert not [node for node in scene.nodes if node.kind == "text" and node.text == "•"]
+
+
+def test_scene_graph_expands_label_text_box_to_colored_backplate(tmp_path):
+    image_path = tmp_path / "label-backplate.png"
+    image = Image.new("RGB", (360, 120), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([40, 36, 260, 88], fill="#bd0f0e")
+    image.save(image_path)
+    project = Project(
+        id="scene-label-backplate",
+        image_path=str(image_path),
+        width=360,
+        height=120,
+        components=[
+            Component(id="label-bg", type="shape", bbox=BBox(x=40, y=36, width=220, height=52), source="opencv-residual"),
+            Component(id="label", type="text", bbox=BBox(x=76, y=46, width=150, height=30), text="D) KEY TAKEAWAY", source="paddleocr"),
+        ],
+    )
+
+    with Image.open(image_path).convert("RGBA") as source:
+        scene = build_scene_graph(project, source)
+
+    label = next(node for node in scene.nodes if node.kind == "text" and node.text == "D) KEY TAKEAWAY")
+    assert label.bbox.width > 170
+    assert label.bbox.height == 30
 
 
 def test_scene_graph_removes_redundant_header_subimage(tmp_path):

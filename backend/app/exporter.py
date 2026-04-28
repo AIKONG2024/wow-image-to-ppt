@@ -11,6 +11,7 @@ from pptx.enum.text import MSO_ANCHOR
 from pptx.oxml.xmlchemy import OxmlElement
 from pptx.util import Inches, Pt
 
+from .image_editing import erase_regions
 from .models import Project, SceneNode
 from .scene import build_scene_graph, scene_paint_order
 from .storage import ProjectStore
@@ -156,6 +157,7 @@ def _add_picture(
     )
     if primitive.mask_path and Path(primitive.mask_path).exists() and primitive.source_component_type not in SOURCE_CROP_VISUAL_TYPES:
         crop = _apply_mask(crop, Path(primitive.mask_path), primitive)
+    crop = erase_regions(crop, primitive.bbox, primitive.erase_boxes)
 
     _add_pil_picture(slide, crop, x, y, width, height)
 
@@ -197,6 +199,10 @@ def _apply_mask(crop: Image.Image, mask_path: Path, primitive: SceneNode) -> Ima
 
 def _font_size(width: float, height: float, text: str) -> float:
     longest = max(text.splitlines() or [text], key=len)
+    if _is_section_label_text(text):
+        by_width = width * 72 / max(_text_units(longest, latin_width=0.5), 1.0) * 0.96
+        by_height = height * 72 * 0.78
+        return max(10.0, min(48.0, by_width, by_height))
     if _is_latin_display_text(width, height, text):
         by_width = width * 72 / max(_text_units(longest, latin_width=0.36), 1.0) * 0.96
         by_height = height * 72 / max(text.count("\n") + 1, 1) * 0.86
@@ -256,6 +262,15 @@ def _is_short_uppercase_label(text: str) -> bool:
         return False
     uppercase = sum(1 for char in letters if char.upper() == char)
     return len(text.strip()) <= 56 and uppercase / max(1, len(letters)) >= 0.75
+
+
+def _is_section_label_text(text: str) -> bool:
+    stripped = text.strip()
+    return (
+        _is_short_uppercase_label(stripped)
+        and len(stripped) >= 2
+        and (stripped[1] in {")", "]"} or stripped[:3].upper() == "VS.")
+    )
 
 
 def _latin_character_ratio(text: str) -> float:

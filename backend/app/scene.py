@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from .image_editing import erase_regions
 from .models import BBox, Project, PptPrimitive, SceneGraph, SceneNode
 from .reconstruction import reconstruct_project
 
@@ -40,7 +41,9 @@ def build_scene_graph(project: Project, source: Image.Image) -> SceneGraph:
     _normalize_number_label_text_boxes(nodes)
     nodes.extend(_synthesized_info_card_rects(nodes, project.width, project.height))
     nodes.extend(_synthesized_text_background_rects(nodes, source))
+    _normalize_label_text_boxes_to_backplates(nodes)
     nodes.extend(_synthesized_bullet_texts(nodes, source))
+    _assign_text_erasure_boxes(nodes)
     return SceneGraph(width=project.width, height=project.height, nodes=nodes)
 
 
@@ -76,6 +79,47 @@ def _trim_text_nodes_at_large_side_images(nodes: list[SceneNode], width: int, he
         else:
             trimmed.append(node.model_copy(update={"bbox": bbox}))
     return trimmed
+
+
+def _assign_text_erasure_boxes(nodes: list[SceneNode]) -> None:
+    text_nodes = [node for node in nodes if node.kind == "text" and node.text and node.text.strip() != "•"]
+    image_nodes = [node for node in nodes if node.kind == "image"]
+    if not text_nodes or not image_nodes:
+        return
+    for image_node in image_nodes:
+        erase_boxes: list[BBox] = []
+        for text_node in text_nodes:
+            if not _should_erase_text_from_image(image_node, text_node):
+                continue
+            erase_boxes.append(text_node.bbox)
+        if erase_boxes:
+            image_node.erase_boxes = erase_boxes
+
+
+def _should_erase_text_from_image(image_node: SceneNode, text_node: SceneNode) -> bool:
+    overlap = _intersection_area(image_node.bbox, text_node.bbox)
+    if overlap <= 0:
+        return False
+    text_area = _bbox_area(text_node.bbox)
+    if overlap / max(1.0, text_area) < 0.55:
+        return False
+    if _is_large_artwork_text_on_side_image(image_node, text_node):
+        return False
+    if _is_large_digit_text_node(text_node):
+        return False
+    return True
+
+
+def _is_large_artwork_text_on_side_image(image_node: SceneNode, text_node: SceneNode) -> bool:
+    if image_node.source_component_type != "image":
+        return False
+    if image_node.bbox.width < 160 or image_node.bbox.height < 100:
+        return False
+    if image_node.bbox.width > image_node.bbox.height * 2.4:
+        return False
+    if text_node.bbox.height < image_node.bbox.height * 0.14:
+        return False
+    return text_node.bbox.width >= image_node.bbox.width * 0.28
 
 
 def _merge_adjacent_text_line_nodes(nodes: list[SceneNode]) -> list[SceneNode]:
@@ -554,6 +598,40 @@ def _normalize_dark_label_rects(nodes: list[SceneNode]) -> None:
         rect.bbox = BBox(x=x1, y=rect.bbox.y, width=x2 - x1, height=rect.bbox.height)
 
 
+def _normalize_label_text_boxes_to_backplates(nodes: list[SceneNode]) -> None:
+    rects = [node for node in nodes if node.kind == "rect" and node.fill_color and node.bbox.height <= 90]
+    for text_node in nodes:
+        if text_node.kind != "text" or not text_node.text:
+            continue
+        if _is_large_digit_text_node(text_node) or not _is_section_label_text(text_node.text):
+            continue
+        candidates = [
+            rect
+            for rect in rects
+            if _containment_ratio(text_node.bbox, _expanded_bbox(rect.bbox, 4.0, 4.0)) >= 0.55
+            and rect.bbox.width <= max(420.0, text_node.bbox.width * 2.4)
+            and rect.bbox.height <= max(90.0, text_node.bbox.height * 2.2)
+        ]
+        if not candidates:
+            continue
+        rect = min(candidates, key=lambda item: _bbox_area(item.bbox))
+        pad = max(4.0, rect.bbox.height * 0.08)
+        x1 = rect.bbox.x + pad
+        x2 = rect.bbox.x + rect.bbox.width - pad
+        if x2 <= x1 or x2 - x1 <= text_node.bbox.width:
+            continue
+        text_node.bbox = BBox(x=x1, y=text_node.bbox.y, width=x2 - x1, height=text_node.bbox.height)
+
+
+def _is_section_label_text(text: str) -> bool:
+    stripped = text.strip()
+    return (
+        _is_short_uppercase_label(stripped)
+        and len(stripped) >= 2
+        and (stripped[1] in {")", "]"} or stripped[:3].upper() == "VS.")
+    )
+
+
 def _trim_chart_images_below_overlapping_text_labels(nodes: list[SceneNode]) -> None:
     text_nodes = [node for node in nodes if node.kind == "text" and node.text]
     for image_node in nodes:
@@ -605,6 +683,8 @@ def _synthesized_bullet_texts(nodes: list[SceneNode], source: Image.Image) -> li
             continue
         if text_node.bbox.x < 24 or text_node.bbox.height < 12:
             continue
+        if text_node.bbox.x > source.width * 0.42:
+            continue
         search_left = max(0.0, text_node.bbox.x - max(46.0, text_node.bbox.height * 3.2))
         search_right = max(search_left, text_node.bbox.x - max(8.0, text_node.bbox.height * 0.45))
         search = BBox(
@@ -617,6 +697,8 @@ def _synthesized_bullet_texts(nodes: list[SceneNode], source: Image.Image) -> li
             continue
         bullet_box = _detect_bullet_dot(source, search, text_node.bbox)
         if bullet_box is None:
+            continue
+        if text_node.bbox.x - (bullet_box.x + bullet_box.width) > max(34.0, text_node.bbox.height * 2.3):
             continue
         bullets.append(
             SceneNode(
@@ -984,6 +1066,7 @@ def _image_data_uri(source: Image.Image, node: SceneNode) -> str | None:
             return None
         if node.mask_path and Path(node.mask_path).exists() and not _should_use_source_crop(node):
             image = _apply_mask(image, Path(node.mask_path), node.bbox)
+    image = erase_regions(image, node.bbox, node.erase_boxes)
     stream = BytesIO()
     image.save(stream, format="PNG")
     encoded = base64.b64encode(stream.getvalue()).decode("ascii")
@@ -996,6 +1079,10 @@ def _should_use_source_crop(node: SceneNode) -> bool:
 
 def _svg_text_font_size(bbox: BBox, text: str) -> float:
     longest = max(text.splitlines() or [text], key=len)
+    if _is_section_label_text(text):
+        by_width = bbox.width / max(_text_units(longest, latin_width=0.5), 1.0) * 0.96
+        by_height = bbox.height * 0.78
+        return max(10.0, min(72.0, by_width, by_height))
     if _is_latin_display_text(bbox, text):
         by_width = bbox.width / max(_text_units(longest, latin_width=0.36), 1.0) * 0.94
         by_height = bbox.height * 0.86

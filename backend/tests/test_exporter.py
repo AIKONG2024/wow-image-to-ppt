@@ -175,7 +175,7 @@ def test_export_uses_residual_components_instead_of_full_slide_background(tmp_pa
     assert len(auto_shapes) == 1
 
 
-def test_export_preserves_visible_text_pixels_in_masked_visual_components(tmp_path):
+def test_export_erases_visible_text_pixels_in_masked_visual_components(tmp_path):
     image_path = source_slide(tmp_path)
     mask_path = tmp_path / "title-band-mask.png"
     mask = Image.new("L", (160, 90), 0)
@@ -213,10 +213,10 @@ def test_export_preserves_visible_text_pixels_in_masked_visual_components(tmp_pa
     assert len(pictures) == 1
     red, green, blue, alpha = pictures[0].getpixel((20, 8))
     assert alpha > 0
-    assert (red, green, blue) == (0, 0, 0)
+    assert (red, green, blue) != (0, 0, 0)
 
 
-def test_export_preserves_chart_pixels_under_editable_text(tmp_path):
+def test_export_erases_chart_pixels_under_editable_text(tmp_path):
     image_path = tmp_path / "chart-under-text.png"
     image = Image.new("RGB", (200, 120), "white")
     draw = ImageDraw.Draw(image)
@@ -239,7 +239,7 @@ def test_export_preserves_chart_pixels_under_editable_text(tmp_path):
 
     pictures = media_images(pptx_path)
     assert len(pictures) == 1
-    assert pictures[0].getpixel((25, 20))[:3] == (0, 0, 0)
+    assert pictures[0].getpixel((25, 20))[:3] != (0, 0, 0)
     assert_text_shapes_are_frontmost(pptx_path)
 
 
