@@ -1,8 +1,8 @@
-# Image to PPT
+[한국어](README.md) | [EN](README_EN.md)
+
+# WOW Image to PPT
 
 A web service that uploads slide images, splits visual elements into components, and exports them as editable PPTX files.
-
-Korean README: [README.md](README.md)
 
 ## Example
 
@@ -17,12 +17,6 @@ Detected components:
 Reconstructed editable scene preview:
 
 ![Reconstructed scene](docs/examples/one-pun-scene.png)
-
-Generated files:
-
-- [Example PPTX](docs/examples/one-pun-editable.pptx)
-- [Scene SVG](docs/examples/one-pun-scene.svg)
-- [Analysis summary](docs/examples/one-pun-analysis-summary.json)
 
 ## How to Use
 
@@ -49,7 +43,7 @@ On Windows, you can also run:
 
 ### 2. Create a PPT from the web page
 
-1. Upload a 16:9 slide image.
+1. Upload a slide image to parse, such as one made with GPT-Image2, Duct Tape, or Nano Banana.
 2. Click `분석 실행`.
 3. Check the detected components on the screen.
 4. Use `병합`, `분리`, or `제외` if you need to clean up the components.

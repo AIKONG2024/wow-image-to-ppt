@@ -1,8 +1,8 @@
-# Image to PPT
+[한국어](README.md) | [EN](README_EN.md)
+
+# WOW Image to PPT
 
 이미지 슬라이드를 웹에서 업로드하면 화면 요소를 컴포넌트로 나누고 편집 가능한 PPTX로 내보내는 웹서비스입니다.
-
-English README: [README_EN.md](README_EN.md)
 
 ## Example
 
@@ -17,12 +17,6 @@ Detected components:
 Reconstructed editable scene preview:
 
 ![Reconstructed scene](docs/examples/one-pun-scene.png)
-
-Generated files:
-
-- [Example PPTX](docs/examples/one-pun-editable.pptx)
-- [Scene SVG](docs/examples/one-pun-scene.svg)
-- [Analysis summary](docs/examples/one-pun-analysis-summary.json)
 
 ## 사용 방법
 
@@ -49,7 +43,7 @@ Windows에서는 아래 스크립트로 실행할 수도 있습니다.
 
 ### 2. 웹에서 PPT 만들기
 
-1. 16:9 슬라이드 이미지를 업로드합니다.
+1. GPT-Image2, Duct Tape, Nano Banana 등으로 만든 파싱할 슬라이드 이미지를 업로드합니다.
 2. `분석 실행`을 누릅니다.
 3. 화면에 잡힌 컴포넌트를 확인합니다.
 4. 필요하면 `병합`, `분리`, `제외`로 컴포넌트를 정리합니다.
