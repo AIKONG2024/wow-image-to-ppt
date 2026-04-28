@@ -11,7 +11,6 @@ from pptx.enum.text import MSO_ANCHOR
 from pptx.oxml.xmlchemy import OxmlElement
 from pptx.util import Inches, Pt
 
-from .image_editing import erase_regions
 from .models import Project, SceneNode
 from .scene import build_scene_graph, scene_paint_order
 from .storage import ProjectStore
@@ -143,11 +142,6 @@ def _add_picture(
 ):
     asset = Path(primitive.asset_path) if primitive.asset_path else None
     if asset and asset.exists() and primitive.source_component_type not in SOURCE_CROP_VISUAL_TYPES:
-        if primitive.erase_boxes:
-            with Image.open(asset) as opened:
-                image = erase_regions(opened.convert("RGBA"), primitive.bbox, primitive.erase_boxes)
-            _add_pil_picture(slide, image, x, y, width, height)
-            return
         slide.shapes.add_picture(str(asset), Inches(x), Inches(y), width=Inches(width), height=Inches(height))
         return
 
@@ -161,7 +155,6 @@ def _add_picture(
     )
     if primitive.mask_path and Path(primitive.mask_path).exists() and primitive.source_component_type not in SOURCE_CROP_VISUAL_TYPES:
         crop = _apply_mask(crop, Path(primitive.mask_path), primitive)
-    crop = erase_regions(crop, primitive.bbox, primitive.erase_boxes)
 
     _add_pil_picture(slide, crop, x, y, width, height)
 

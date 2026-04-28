@@ -9,7 +9,6 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from .image_editing import erase_regions
 from .models import BBox, Project, PptPrimitive, SceneGraph, SceneNode
 from .reconstruction import reconstruct_project
 
@@ -40,7 +39,6 @@ def build_scene_graph(project: Project, source: Image.Image) -> SceneGraph:
     nodes.extend(_synthesized_info_card_rects(nodes, project.width, project.height))
     nodes.extend(_synthesized_text_background_rects(nodes, source))
     nodes.extend(_synthesized_bullet_texts(nodes, source))
-    _mark_text_regions_for_picture_erasing(nodes)
     return SceneGraph(width=project.width, height=project.height, nodes=nodes)
 
 
@@ -243,56 +241,6 @@ def _remove_redundant_header_images(nodes: list[SceneNode], width: int, height: 
             if _containment_ratio(child.bbox, parent.bbox) >= 0.9:
                 redundant.add(child.id)
     return [node for node in nodes if node.id not in redundant]
-
-
-def _mark_text_regions_for_picture_erasing(nodes: list[SceneNode]) -> None:
-    text_nodes = [node for node in nodes if node.kind == "text" and node.text]
-    scene_width = _scene_width(nodes)
-    scene_height = _scene_height(nodes)
-    for image_node in nodes:
-        if image_node.kind != "image":
-            continue
-        if image_node.source_component_type == "icon":
-            continue
-        protect_large_art_text = image_node.source_component_type == "image" and _is_large_side_image(
-            image_node.bbox, scene_width, scene_height
-        )
-        image_node.erase_boxes = [
-            text_node.bbox
-            for text_node in text_nodes
-            if _should_erase_text_from_image(
-                image_node.bbox, text_node.bbox, protect_large_art_text=protect_large_art_text
-            )
-        ]
-
-
-def _should_erase_text_from_image(
-    image_bbox: BBox, text_bbox: BBox, *, protect_large_art_text: bool = False
-) -> bool:
-    intersection = _intersection_area(text_bbox, image_bbox)
-    if intersection <= 0:
-        return False
-    text_area = _bbox_area(text_bbox)
-    image_area = _bbox_area(image_bbox)
-    if text_area <= 0 or image_area <= 0:
-        return False
-    text_covered = intersection / text_area
-    image_covered = intersection / image_area
-    if protect_large_art_text and text_area / image_area > 0.14:
-        return False
-    return text_covered >= 0.55 and image_covered <= 0.55
-
-
-def _scene_width(nodes: list[SceneNode]) -> int:
-    if not nodes:
-        return 1
-    return max(1, int(round(max(node.bbox.x + node.bbox.width for node in nodes))))
-
-
-def _scene_height(nodes: list[SceneNode]) -> int:
-    if not nodes:
-        return 1
-    return max(1, int(round(max(node.bbox.y + node.bbox.height for node in nodes))))
 
 
 def _preserve_complex_shape_regions(nodes: list[SceneNode], source: Image.Image) -> list[SceneNode]:
@@ -847,7 +795,6 @@ def _image_data_uri(source: Image.Image, node: SceneNode) -> str | None:
             return None
         if node.mask_path and Path(node.mask_path).exists() and not _should_use_source_crop(node):
             image = _apply_mask(image, Path(node.mask_path), node.bbox)
-    image = erase_regions(image, node.bbox, node.erase_boxes)
     stream = BytesIO()
     image.save(stream, format="PNG")
     encoded = base64.b64encode(stream.getvalue()).decode("ascii")

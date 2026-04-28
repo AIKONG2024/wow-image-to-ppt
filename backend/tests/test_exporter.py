@@ -180,6 +180,32 @@ def test_export_preserves_visible_text_pixels_in_masked_visual_components(tmp_pa
     assert (red, green, blue) == (0, 0, 0)
 
 
+def test_export_preserves_chart_pixels_under_editable_text(tmp_path):
+    image_path = tmp_path / "chart-under-text.png"
+    image = Image.new("RGB", (200, 120), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([30, 20, 170, 90], outline="#2563eb", width=2)
+    draw.rectangle([50, 36, 120, 48], fill="black")
+    image.save(image_path)
+    project = Project(
+        id="chart-under-text-export",
+        image_path=str(image_path),
+        width=200,
+        height=120,
+        status="analyzed",
+        components=[
+            Component(id="chart", type="chart", bbox=BBox(x=30, y=20, width=140, height=70), source="sam3"),
+            Component(id="chart-label", type="text", bbox=BBox(x=50, y=36, width=70, height=12), text="Axis", source="paddleocr"),
+        ],
+    )
+
+    pptx_path = export_pptx(project, project_store(tmp_path))
+
+    pictures = media_images(pptx_path)
+    assert len(pictures) == 1
+    assert pictures[0].getpixel((25, 20))[:3] == (0, 0, 0)
+
+
 def test_export_uses_source_crop_for_chart_assets_to_keep_annotations(tmp_path):
     image_path = tmp_path / "chart-source.png"
     image = Image.new("RGB", (140, 90), "white")

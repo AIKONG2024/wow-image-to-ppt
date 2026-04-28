@@ -48,7 +48,7 @@ def test_scene_graph_renders_svg_with_native_rect_text_and_embedded_image(tmp_pa
     assert root.attrib["viewBox"] == "0 0 180 100"
 
 
-def test_scene_graph_marks_header_picture_text_regions_for_erasing(tmp_path):
+def test_scene_graph_keeps_header_picture_pixels_under_editable_text(tmp_path):
     image_path = tmp_path / "slide.png"
     image = Image.new("RGB", (200, 100), "white")
     draw = ImageDraw.Draw(image)
@@ -72,13 +72,12 @@ def test_scene_graph_marks_header_picture_text_regions_for_erasing(tmp_path):
         svg = render_scene_svg(scene, source)
 
     image_node = next(node for node in scene.nodes if node.kind == "image")
-    assert image_node.erase_boxes
-    assert image_node.erase_boxes[0] == BBox(x=20, y=6, width=60, height=8)
+    assert image_node.erase_boxes == []
     embedded = _first_embedded_png(svg)
-    assert embedded.getpixel((40, 10))[:3] != (0, 0, 0)
+    assert embedded.getpixel((40, 10))[:3] == (0, 0, 0)
 
 
-def test_scene_graph_erases_editable_text_from_chart_pictures(tmp_path):
+def test_scene_graph_keeps_chart_picture_pixels_under_editable_text(tmp_path):
     image_path = tmp_path / "chart.png"
     image = Image.new("RGB", (200, 120), "white")
     draw = ImageDraw.Draw(image)
@@ -101,7 +100,7 @@ def test_scene_graph_erases_editable_text_from_chart_pictures(tmp_path):
 
     image_node = next(node for node in scene.nodes if node.kind == "image")
     assert image_node.source_component_type == "chart"
-    assert image_node.erase_boxes == [BBox(x=50, y=36, width=70, height=12)]
+    assert image_node.erase_boxes == []
 
 
 def test_scene_graph_does_not_erase_text_that_only_slightly_overlaps_large_image(tmp_path):
@@ -131,7 +130,7 @@ def test_scene_graph_does_not_erase_text_that_only_slightly_overlaps_large_image
     assert text_node.bbox.x + text_node.bbox.width <= image_node.bbox.x
 
 
-def test_scene_graph_erases_editable_text_inside_large_illustration(tmp_path):
+def test_scene_graph_keeps_illustration_pixels_under_editable_text(tmp_path):
     image_path = tmp_path / "illustration.png"
     image = Image.new("RGB", (300, 160), "white")
     draw = ImageDraw.Draw(image)
@@ -155,7 +154,7 @@ def test_scene_graph_erases_editable_text_inside_large_illustration(tmp_path):
     image_node = next(node for node in scene.nodes if node.kind == "image")
     text_node = next(node for node in scene.nodes if node.kind == "text")
     assert text_node.text == "BAM"
-    assert image_node.erase_boxes == [BBox(x=190, y=104, width=86, height=30)]
+    assert image_node.erase_boxes == []
 
 
 def test_scene_graph_keeps_huge_stylized_image_text_as_artwork(tmp_path):
@@ -216,7 +215,7 @@ def test_scene_graph_keeps_complex_region_text_editable(tmp_path):
     assert image_nodes
     embedded = _first_embedded_png(svg)
     assert embedded.getpixel((40, 10))[:3] == (215, 25, 32)
-    assert embedded.getpixel((166, 20))[:3] != (0, 0, 0)
+    assert embedded.getpixel((166, 20))[:3] == (0, 0, 0)
 
 
 def test_scene_graph_keeps_dense_icon_text_list_editable(tmp_path):
