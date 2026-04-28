@@ -3,7 +3,7 @@
   "runtime": {
     "paddleocr": {
       "available": true,
-      "python": ".venv-ocr\\Scripts\\python.exe",
+      "python": "C:\\Users\\ust21\\Documents\\ppt-agent-studio\\.venv-ocr\\Scripts\\python.exe",
       "worker_available": true,
       "ready": true,
       "mode": "subprocess"
@@ -39,11 +39,11 @@
     "shape": 7,
     "chart": 2
   },
-  "scene_nodes": 53,
+  "scene_nodes": 12,
   "scene_node_types": {
-    "rect": 9,
-    "image": 9,
-    "text": 35
+    "rect": 2,
+    "image": 8,
+    "text": 2
   },
   "files": {
     "input": "docs/examples/one-pun-input.png",

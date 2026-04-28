@@ -104,6 +104,33 @@ def test_scene_graph_does_not_erase_text_inside_chart_pictures(tmp_path):
     assert image_node.erase_boxes == []
 
 
+def test_scene_graph_does_not_erase_text_that_only_slightly_overlaps_large_image(tmp_path):
+    image_path = tmp_path / "large-image-title-overlap.png"
+    image = Image.new("RGB", (300, 160), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([170, 0, 300, 160], fill="#d71920")
+    draw.rectangle([20, 6, 188, 42], fill="black")
+    image.save(image_path)
+    project = Project(
+        id="scene-large-image-title-overlap",
+        image_path=str(image_path),
+        width=300,
+        height=160,
+        components=[
+            Component(id="hero-image", type="image", bbox=BBox(x=170, y=0, width=130, height=160), source="opencv-residual"),
+            Component(id="title", type="text", bbox=BBox(x=20, y=6, width=168, height=36), text="Strong Title", source="paddleocr"),
+        ],
+    )
+
+    with Image.open(image_path).convert("RGBA") as source:
+        scene = build_scene_graph(project, source)
+
+    image_node = next(node for node in scene.nodes if node.kind == "image")
+    text_node = next(node for node in scene.nodes if node.kind == "text")
+    assert image_node.erase_boxes == []
+    assert text_node.bbox.x + text_node.bbox.width <= image_node.bbox.x
+
+
 def test_scene_graph_keeps_text_inside_large_illustration_as_part_of_image(tmp_path):
     image_path = tmp_path / "illustration.png"
     image = Image.new("RGB", (300, 160), "white")
@@ -127,6 +154,71 @@ def test_scene_graph_keeps_text_inside_large_illustration_as_part_of_image(tmp_p
 
     assert [node.kind for node in scene.nodes] == ["image"]
     assert scene.nodes[0].erase_boxes == []
+
+
+def test_scene_graph_preserves_complex_shape_region_as_image_backplate(tmp_path):
+    image_path = tmp_path / "complex-banner.png"
+    image = Image.new("RGB", (420, 140), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([24, 58, 390, 118], fill="#fdfdfd", outline="#bd110d", width=2)
+    draw.polygon([(24, 58), (160, 58), (140, 118), (24, 118)], fill="#d71920")
+    draw.rectangle([52, 72, 138, 100], fill="white")
+    draw.rectangle([190, 78, 330, 94], fill="black")
+    image.save(image_path)
+    project = Project(
+        id="scene-complex-banner",
+        image_path=str(image_path),
+        width=420,
+        height=140,
+        components=[
+            Component(id="banner", type="shape", bbox=BBox(x=24, y=58, width=366, height=60), source="opencv-residual"),
+            Component(id="label", type="text", bbox=BBox(x=52, y=72, width=86, height=28), text="KEY TAKEAWAY", source="paddleocr"),
+            Component(id="body", type="text", bbox=BBox(x=190, y=78, width=140, height=16), text="Editable summary", source="paddleocr"),
+        ],
+    )
+
+    with Image.open(image_path).convert("RGBA") as source:
+        scene = build_scene_graph(project, source)
+        svg = render_scene_svg(scene, source)
+
+    assert [node.kind for node in scene.nodes] == ["image"]
+    embedded = _first_embedded_png(svg)
+    assert embedded.getpixel((40, 10))[:3] == (215, 25, 32)
+    assert embedded.getpixel((190, 28))[:3] == (0, 0, 0)
+
+
+def test_scene_graph_preserves_dense_icon_text_list_as_one_image_panel(tmp_path):
+    image_path = tmp_path / "dense-list.png"
+    image = Image.new("RGB", (520, 420), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([24, 28, 470, 386], outline="#d1d5db", width=2)
+    for index, y in enumerate((70, 140, 210, 280)):
+        draw.ellipse([42, y, 90, y + 48], fill="#111827")
+        draw.rectangle([112, y + 6, 154, y + 44], fill="#facc15")
+        draw.rectangle([178, y + 6, 398, y + 22], fill="black")
+        if index < 3:
+            draw.line([42, y + 62, 430, y + 62], fill="#d1d5db", width=1)
+    image.save(image_path)
+    components = []
+    for index, y in enumerate((70, 140, 210, 280)):
+        components.extend(
+            [
+                Component(id=f"icon-{index}", type="icon", bbox=BBox(x=42, y=y, width=48, height=48), source="opencv-residual"),
+                Component(id=f"num-bg-{index}", type="shape", bbox=BBox(x=112, y=y + 6, width=42, height=38), source="opencv-residual"),
+                Component(id=f"heading-{index}", type="text", bbox=BBox(x=178, y=y + 6, width=220, height=16), text=f"ITEM {index + 1}", source="paddleocr"),
+            ]
+        )
+    project = Project(id="scene-dense-list", image_path=str(image_path), width=520, height=420, components=components)
+
+    with Image.open(image_path).convert("RGBA") as source:
+        scene = build_scene_graph(project, source)
+
+    assert len(scene.nodes) == 1
+    assert scene.nodes[0].kind == "image"
+    assert scene.nodes[0].bbox.x <= 28
+    assert scene.nodes[0].bbox.y <= 60
+    assert scene.nodes[0].bbox.x + scene.nodes[0].bbox.width >= 398
+    assert scene.nodes[0].bbox.y + scene.nodes[0].bbox.height >= 328
 
 
 def test_scene_graph_removes_redundant_header_subimage(tmp_path):
@@ -244,6 +336,35 @@ def test_scene_graph_keeps_top_black_title_dark_on_white_background(tmp_path):
     root = ElementTree.fromstring(svg)
     text = next(item for item in root.iter() if item.tag.endswith("text"))
     assert float(text.attrib["font-size"]) >= 34
+
+
+def test_scene_graph_uses_condensed_display_style_for_large_english_title(tmp_path):
+    image_path = tmp_path / "display-title.png"
+    Image.new("RGB", (1200, 400), "white").save(image_path)
+    project = Project(
+        id="scene-display-title-style",
+        image_path=str(image_path),
+        width=1200,
+        height=400,
+        components=[
+            Component(
+                id="title",
+                type="text",
+                bbox=BBox(x=20, y=8, width=840, height=92),
+                text="Why Is One Punch Man So Strong?",
+                source="paddleocr",
+            ),
+        ],
+    )
+
+    with Image.open(image_path).convert("RGBA") as source:
+        svg = render_scene_svg(build_scene_graph(project, source), source)
+
+    root = ElementTree.fromstring(svg)
+    text = next(item for item in root.iter() if item.tag.endswith("text"))
+    assert float(text.attrib["font-size"]) >= 58
+    assert "Impact" in text.attrib["font-family"]
+    assert text.attrib["font-weight"] == "900"
 
 
 def test_scene_graph_merges_adjacent_ocr_words_on_same_title_line(tmp_path):

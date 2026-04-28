@@ -31,8 +31,11 @@ def build_scene_graph(project: Project, source: Image.Image) -> SceneGraph:
     nodes = _remove_redundant_header_images(nodes, project.width, project.height)
     _mark_text_colors(nodes, source)
     nodes = _merge_adjacent_text_line_nodes(nodes)
+    nodes = _trim_text_nodes_at_large_side_images(nodes, project.width, project.height)
     _normalize_dark_label_rects(nodes)
     _trim_chart_images_below_overlapping_text_labels(nodes)
+    nodes = _preserve_complex_shape_regions(nodes, source)
+    nodes = _preserve_dense_icon_text_panels(nodes, project.width, project.height)
     nodes = _remove_text_inside_large_image_nodes(nodes, project.width, project.height)
     nodes.extend(_synthesized_info_card_rects(nodes, project.width, project.height))
     nodes.extend(_synthesized_text_background_rects(nodes, source))
@@ -61,6 +64,40 @@ def _remove_text_inside_large_image_nodes(nodes: list[SceneNode], width: int, he
     if not removed_text_ids:
         return nodes
     return [node for node in nodes if node.id not in removed_text_ids]
+
+
+def _trim_text_nodes_at_large_side_images(nodes: list[SceneNode], width: int, height: int) -> list[SceneNode]:
+    side_images = [
+        node
+        for node in nodes
+        if node.kind == "image"
+        and node.source_component_type == "image"
+        and _is_large_side_image(node.bbox, width, height)
+    ]
+    if not side_images:
+        return nodes
+    trimmed: list[SceneNode] = []
+    for node in nodes:
+        if node.kind != "text" or not node.text:
+            trimmed.append(node)
+            continue
+        bbox = node.bbox
+        for image_node in side_images:
+            if image_node.bbox.x <= bbox.x:
+                continue
+            if _vertical_overlap_ratio(bbox, image_node.bbox) < 0.12:
+                continue
+            overlap = _horizontal_intersection(bbox, image_node.bbox)
+            if overlap <= 0 or overlap / max(1.0, bbox.width) > 0.25:
+                continue
+            new_width = image_node.bbox.x - bbox.x - 6.0
+            if new_width >= bbox.width * 0.55:
+                bbox = BBox(x=bbox.x, y=bbox.y, width=max(1.0, new_width), height=bbox.height)
+        if bbox == node.bbox:
+            trimmed.append(node)
+        else:
+            trimmed.append(node.model_copy(update={"bbox": bbox}))
+    return trimmed
 
 
 def _merge_adjacent_text_line_nodes(nodes: list[SceneNode]) -> list[SceneNode]:
@@ -153,6 +190,7 @@ def render_scene_svg(scene: SceneGraph, source: Image.Image) -> str:
         '<path d="M0,0 L8,3 L0,6 Z" fill="#111827"/>',
         "</marker>",
         "</defs>",
+        f'<rect x="0" y="0" width="{scene.width}" height="{scene.height}" fill="#ffffff"/>',
     ]
     for node in sorted(scene.nodes, key=lambda item: (item.z_index, item.bbox.y, item.bbox.x)):
         if node.kind == "rect":
@@ -235,8 +273,195 @@ def _mark_text_regions_for_picture_erasing(nodes: list[SceneNode]) -> None:
         image_node.erase_boxes = [
             text_node.bbox
             for text_node in text_nodes
-            if _intersection_area(text_node.bbox, image_node.bbox) > 0
+            if _should_erase_text_from_image(image_node.bbox, text_node.bbox)
         ]
+
+
+def _should_erase_text_from_image(image_bbox: BBox, text_bbox: BBox) -> bool:
+    intersection = _intersection_area(text_bbox, image_bbox)
+    if intersection <= 0:
+        return False
+    text_area = _bbox_area(text_bbox)
+    image_area = _bbox_area(image_bbox)
+    if text_area <= 0 or image_area <= 0:
+        return False
+    text_covered = intersection / text_area
+    image_covered = intersection / image_area
+    return text_covered >= 0.55 and image_covered <= 0.55
+
+
+def _preserve_complex_shape_regions(nodes: list[SceneNode], source: Image.Image) -> list[SceneNode]:
+    candidates: list[SceneNode] = []
+    for node in nodes:
+        if not (
+            node.kind == "rect"
+            and node.source_component_type == "shape"
+            and node.z_index <= 1200
+            and not _is_top_header_region(node.bbox, source.width, source.height)
+            and _is_complex_source_region(source, node.bbox)
+            and not _contains_large_chart_image(node.bbox, nodes)
+        ):
+            continue
+        candidates.append(
+            SceneNode(
+                id=f"complex-region-{uuid.uuid4().hex[:10]}",
+                kind="image",
+                bbox=node.bbox,
+                source_component_id=node.source_component_id,
+                source_component_type="image",
+                z_index=1750,
+            )
+        )
+    return _replace_regions_with_source_images(nodes, candidates)
+
+
+def _preserve_dense_icon_text_panels(nodes: list[SceneNode], width: int, height: int) -> list[SceneNode]:
+    icon_nodes = [
+        node
+        for node in nodes
+        if node.kind == "image"
+        and node.source_component_type == "icon"
+        and node.bbox.height >= 24
+        and node.bbox.y >= height * 0.12
+    ]
+    if len(icon_nodes) < 3:
+        return nodes
+
+    clusters: list[list[SceneNode]] = []
+    for icon in sorted(icon_nodes, key=lambda item: (item.bbox.x, item.bbox.y)):
+        for cluster in clusters:
+            cluster_center = sum(item.bbox.x + item.bbox.width / 2 for item in cluster) / len(cluster)
+            icon_center = icon.bbox.x + icon.bbox.width / 2
+            if abs(icon_center - cluster_center) <= max(34.0, width * 0.035):
+                cluster.append(icon)
+                break
+        else:
+            clusters.append([icon])
+
+    panel_candidates: list[SceneNode] = []
+    for cluster in clusters:
+        cluster.sort(key=lambda item: item.bbox.y)
+        if len(cluster) < 3:
+            continue
+        cluster_box = _bbox_union([node.bbox for node in cluster])
+        if cluster_box.height < height * 0.28:
+            continue
+        row_height = max(node.bbox.height for node in cluster)
+        y1 = max(0.0, cluster_box.y - max(54.0, row_height * 0.7))
+        y2 = min(float(height), cluster_box.y + cluster_box.height + max(22.0, row_height * 0.35))
+        search = BBox(
+            x=max(0.0, cluster_box.x - max(18.0, cluster_box.width * 0.2)),
+            y=y1,
+            width=min(float(width), cluster_box.x + max(420.0, width * 0.42)) - max(0.0, cluster_box.x - 18.0),
+            height=y2 - y1,
+        )
+        grouped = [
+            node
+            for node in nodes
+            if node.kind in {"text", "rect", "image"}
+            and node.source_component_type not in {"chart", "table"}
+            and _panel_search_containment(node.bbox, search) >= 0.35
+            and not _is_large_side_image(node.bbox, width, height)
+        ]
+        text_count = sum(1 for node in grouped if node.kind == "text")
+        icon_count = sum(1 for node in grouped if node.kind == "image" and node.source_component_type == "icon")
+        if text_count < 3 or icon_count < 3:
+            continue
+        bbox = _clip_bbox(_expanded_bbox(_bbox_union([node.bbox for node in grouped]), 18.0, 12.0), width, height)
+        if bbox.width < width * 0.22 or bbox.height < height * 0.28:
+            continue
+        panel_candidates.append(
+            SceneNode(
+                id=f"dense-panel-{uuid.uuid4().hex[:10]}",
+                kind="image",
+                bbox=bbox,
+                source_component_id="+".join(node.source_component_id or node.id for node in grouped[:8]),
+                source_component_type="image",
+                z_index=1750,
+            )
+        )
+
+    if not panel_candidates:
+        return nodes
+    return _replace_regions_with_source_images(nodes, panel_candidates)
+
+
+def _replace_regions_with_source_images(nodes: list[SceneNode], regions: list[SceneNode]) -> list[SceneNode]:
+    if not regions:
+        return nodes
+    regions = _dedupe_preserved_regions(regions)
+    removed: set[str] = set()
+    for region in regions:
+        for node in nodes:
+            if node.id == region.id:
+                continue
+            if node.kind in {"line", "arrow"}:
+                continue
+            if _containment_ratio(node.bbox, region.bbox) >= 0.68:
+                removed.add(node.id)
+    kept = [node for node in nodes if node.id not in removed]
+    return [*kept, *regions]
+
+
+def _dedupe_preserved_regions(regions: list[SceneNode]) -> list[SceneNode]:
+    kept: list[SceneNode] = []
+    for candidate in sorted(regions, key=lambda item: _bbox_area(item.bbox), reverse=True):
+        if any(_containment_ratio(candidate.bbox, existing.bbox) >= 0.82 for existing in kept):
+            continue
+        kept.append(candidate)
+    return kept
+
+
+def _contains_large_chart_image(bbox: BBox, nodes: list[SceneNode]) -> bool:
+    for node in nodes:
+        if node.kind != "image" or node.source_component_type not in {"chart", "table"}:
+            continue
+        if _bbox_area(node.bbox) < _bbox_area(bbox) * 0.35:
+            continue
+        if _containment_ratio(node.bbox, bbox) >= 0.72:
+            return True
+    return False
+
+
+def _is_large_side_image(bbox: BBox, width: int, height: int) -> bool:
+    return bbox.height >= height * 0.55 and bbox.width >= width * 0.18
+
+
+def _panel_search_containment(bbox: BBox, search: BBox) -> float:
+    return _intersection_area(bbox, search) / max(1.0, _bbox_area(bbox))
+
+
+def _is_top_header_region(bbox: BBox, width: int, height: int) -> bool:
+    return bbox.y <= height * 0.04 and bbox.width >= width * 0.55 and bbox.height <= height * 0.28
+
+
+def _is_complex_source_region(source: Image.Image, bbox: BBox) -> bool:
+    if _bbox_area(bbox) < 1800:
+        return False
+    crop = _crop(source, bbox).convert("RGB")
+    if crop.width < 18 or crop.height < 18:
+        return False
+    rgb = np.asarray(crop, dtype=np.int16)
+    pixels = rgb.reshape(-1, 3)
+    luma = _pixel_luma(pixels)
+    channel_spread = pixels.max(axis=1) - pixels.min(axis=1)
+    nonwhite = (np.max(np.abs(pixels - 255), axis=1) > 18) | (channel_spread > 14)
+    nonwhite_ratio = float(np.count_nonzero(nonwhite)) / max(1, len(pixels))
+    if nonwhite_ratio < 0.16:
+        return False
+    quantized = (pixels // 32) * 32
+    _, counts = np.unique(quantized, axis=0, return_counts=True)
+    dominant_ratio = float(counts.max()) / max(1, len(pixels))
+    prominent_colors = int(np.count_nonzero(counts >= max(12, int(len(pixels) * 0.012))))
+    color_span = int(max(pixels.max(axis=0) - pixels.min(axis=0)))
+    bright_ratio = float(np.count_nonzero(luma > 235)) / max(1, len(luma))
+    dark_ratio = float(np.count_nonzero(luma < 80)) / max(1, len(luma))
+    return (
+        prominent_colors >= 3
+        and color_span >= 70
+        and dominant_ratio <= 0.78
+        and (bright_ratio >= 0.08 or dark_ratio >= 0.08)
+    )
 
 
 def _mark_text_colors(nodes: list[SceneNode], source: Image.Image) -> None:
@@ -650,12 +875,17 @@ def _image_svg(node: SceneNode, data_uri: str) -> str:
 def _text_svg(node: SceneNode) -> str:
     bbox = node.bbox
     font_size = _svg_text_font_size(bbox, node.text or "")
+    font_family = _svg_text_font_family(bbox, node.text or "")
+    font_weight = _svg_text_font_weight(bbox, node.text or "")
+    font_style = _svg_text_font_style(bbox, node.text or "")
     y = bbox.y + bbox.height * 0.72
     escaped_text = html.escape(node.text or "")
+    text_fit = f' textLength="{_fmt(bbox.width)}" lengthAdjust="spacingAndGlyphs"' if _is_latin_display_text(bbox, node.text or "") else ""
     return (
         f'<text id="{html.escape(node.id)}" {_source_attr(node)} '
-        f'x="{_fmt(bbox.x)}" y="{_fmt(y)}" '
-        f'font-family="Malgun Gothic, Arial, sans-serif" font-size="{_fmt(font_size)}" '
+        f'x="{_fmt(bbox.x)}" y="{_fmt(y)}"{text_fit} '
+        f'font-family="{font_family}" font-size="{_fmt(font_size)}" '
+        f'font-weight="{font_weight}" font-style="{font_style}" '
         f'fill="{_svg_color(node.text_color, "#111827")}">{escaped_text}</text>'
     )
 
@@ -700,12 +930,39 @@ def _should_use_source_crop(node: SceneNode) -> bool:
 
 def _svg_text_font_size(bbox: BBox, text: str) -> float:
     longest = max(text.splitlines() or [text], key=len)
+    if _is_latin_display_text(bbox, text):
+        by_width = bbox.width / max(_text_units(longest, latin_width=0.36), 1.0) * 0.94
+        by_height = bbox.height * 0.86
+        return max(12.0, min(110.0, by_width, by_height))
     by_width = bbox.width / max(_text_units(longest), 1.0) * 0.95
     by_height = bbox.height * 0.72
     return max(8.0, min(96.0, by_width, by_height))
 
 
-def _text_units(text: str) -> float:
+def _svg_text_font_family(bbox: BBox, text: str) -> str:
+    if _is_latin_display_text(bbox, text):
+        return "Impact, Haettenschweiler, Arial Black, Arial Narrow, sans-serif"
+    if _is_latin_text(text):
+        return "Arial, Calibri, sans-serif"
+    return "Malgun Gothic, Arial, sans-serif"
+
+
+def _svg_text_font_weight(bbox: BBox, text: str) -> str:
+    if _is_latin_display_text(bbox, text):
+        return "900"
+    if _is_short_uppercase_label(text):
+        return "700"
+    return "400"
+
+
+def _svg_text_font_style(bbox: BBox, text: str) -> str:
+    stripped = text.strip()
+    if stripped.startswith(("Narrative,", "A narrative", "The narrative")):
+        return "italic"
+    return "normal"
+
+
+def _text_units(text: str, latin_width: float = 0.6) -> float:
     total = 0.0
     for char in text:
         code = ord(char)
@@ -714,8 +971,38 @@ def _text_units(text: str) -> float:
         elif char.isspace():
             total += 0.35
         else:
-            total += 0.6
+            total += latin_width
     return total
+
+
+def _is_latin_display_text(bbox: BBox, text: str) -> bool:
+    stripped = text.strip()
+    return (
+        bbox.height >= 48
+        and len(stripped) >= 12
+        and _latin_character_ratio(stripped) >= 0.72
+        and any(char.isupper() for char in stripped)
+    )
+
+
+def _is_latin_text(text: str) -> bool:
+    return _latin_character_ratio(text.strip()) >= 0.65
+
+
+def _is_short_uppercase_label(text: str) -> bool:
+    letters = [char for char in text if char.isalpha()]
+    if not letters:
+        return False
+    uppercase = sum(1 for char in letters if char.upper() == char)
+    return len(text.strip()) <= 56 and uppercase / max(1, len(letters)) >= 0.75
+
+
+def _latin_character_ratio(text: str) -> float:
+    non_space = [char for char in text if not char.isspace()]
+    if not non_space:
+        return 0.0
+    latin = sum(1 for char in non_space if ord(char) < 128)
+    return latin / len(non_space)
 
 
 def _apply_mask(crop: Image.Image, mask_path: Path, bbox: BBox) -> Image.Image:

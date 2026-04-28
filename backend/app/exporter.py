@@ -70,8 +70,10 @@ def _add_text(slide, x: float, y: float, width: float, height: float, text: str,
     frame.vertical_anchor = MSO_ANCHOR.MIDDLE
     paragraph = frame.paragraphs[0]
     paragraph.text = text
-    paragraph.font.name = FONT
+    paragraph.font.name = _font_name(width, height, text)
     paragraph.font.size = Pt(_font_size(width, height, text))
+    paragraph.font.bold = _font_bold(width, height, text)
+    paragraph.font.italic = _font_italic(text)
     paragraph.font.color.rgb = _rgb_color(text_color or "111827")
     return box
 
@@ -188,9 +190,73 @@ def _apply_mask(crop: Image.Image, mask_path: Path, primitive: SceneNode) -> Ima
 
 def _font_size(width: float, height: float, text: str) -> float:
     longest = max(text.splitlines() or [text], key=len)
-    by_width = width * 72 / max(len(longest), 1) * 1.65
+    if _is_latin_display_text(width, height, text):
+        by_width = width * 72 / max(_text_units(longest, latin_width=0.36), 1.0) * 0.96
+        by_height = height * 72 / max(text.count("\n") + 1, 1) * 0.86
+        return max(10.0, min(72.0, by_width, by_height))
+    by_width = width * 72 / max(_text_units(longest), 1.0) * 0.98
     by_height = height * 72 / max(text.count("\n") + 1, 1) * 0.75
-    return max(7.0, min(20.0, by_width, by_height))
+    return max(7.0, min(34.0, by_width, by_height))
+
+
+def _font_name(width: float, height: float, text: str) -> str:
+    if _is_latin_display_text(width, height, text):
+        return "Impact"
+    if _is_latin_text(text):
+        return "Arial"
+    return FONT
+
+
+def _font_bold(width: float, height: float, text: str) -> bool:
+    return _is_latin_display_text(width, height, text) or _is_short_uppercase_label(text)
+
+
+def _font_italic(text: str) -> bool:
+    stripped = text.strip()
+    return stripped.startswith(("Narrative,", "A narrative", "The narrative"))
+
+
+def _text_units(text: str, latin_width: float = 0.6) -> float:
+    total = 0.0
+    for char in text:
+        code = ord(char)
+        if 0xAC00 <= code <= 0xD7A3 or 0x4E00 <= code <= 0x9FFF:
+            total += 1.0
+        elif char.isspace():
+            total += 0.35
+        else:
+            total += latin_width
+    return total
+
+
+def _is_latin_display_text(width: float, height: float, text: str) -> bool:
+    stripped = text.strip()
+    return (
+        height >= 0.36
+        and len(stripped) >= 12
+        and _latin_character_ratio(stripped) >= 0.72
+        and any(char.isupper() for char in stripped)
+    )
+
+
+def _is_latin_text(text: str) -> bool:
+    return _latin_character_ratio(text.strip()) >= 0.65
+
+
+def _is_short_uppercase_label(text: str) -> bool:
+    letters = [char for char in text if char.isalpha()]
+    if not letters:
+        return False
+    uppercase = sum(1 for char in letters if char.upper() == char)
+    return len(text.strip()) <= 56 and uppercase / max(1, len(letters)) >= 0.75
+
+
+def _latin_character_ratio(text: str) -> float:
+    non_space = [char for char in text if not char.isspace()]
+    if not non_space:
+        return 0.0
+    latin = sum(1 for char in non_space if ord(char) < 128)
+    return latin / len(non_space)
 
 
 def _rgb_color(hex_color: str) -> RGBColor:

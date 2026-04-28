@@ -291,3 +291,32 @@ def test_export_writes_arrow_component_as_connector_not_picture(tmp_path):
         xml = package.read("ppt/slides/slide1.xml").decode("utf-8")
     assert "<p:cxnSp>" in xml
     assert '<a:tailEnd type="triangle"/>' in xml
+
+
+def test_export_uses_condensed_large_font_for_display_title(tmp_path):
+    image_path = tmp_path / "display-title.png"
+    Image.new("RGB", (1200, 400), "white").save(image_path)
+    project = Project(
+        id="display-title-export",
+        image_path=str(image_path),
+        width=1200,
+        height=400,
+        status="analyzed",
+        components=[
+            Component(
+                id="title",
+                type="text",
+                bbox=BBox(x=20, y=8, width=840, height=92),
+                text="Why Is One Punch Man So Strong?",
+                source="paddleocr",
+            )
+        ],
+    )
+
+    pptx_path = export_pptx(project, project_store(tmp_path))
+
+    prs = Presentation(str(pptx_path))
+    paragraph_font = prs.slides[0].shapes[0].text_frame.paragraphs[0].font
+    assert paragraph_font.name == "Impact"
+    assert paragraph_font.bold
+    assert paragraph_font.size.pt >= 34
