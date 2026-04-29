@@ -30,7 +30,7 @@ button, input { font: inherit; }
 .row { justify-content: space-between; }
 .row small { color: #64748b; font-size: 11px; }
 .row.selected { border-color: #1d4ed8; background: #dbeafe; }
-.canvasPane { padding: 18px; overflow: auto; }
+.canvasPane { position: relative; padding: 18px; overflow: auto; }
 .emptyState { min-height: calc(100vh - 112px); display: grid; place-content: center; justify-items: center; gap: 8px; color: #475569; }
 .emptyState strong { color: #111827; font-size: 18px; }
 .canvasStack { max-width: 1280px; margin: 0 auto; display: grid; gap: 12px; }
@@ -54,6 +54,11 @@ button, input { font: inherit; }
 .splitBox { position: absolute; border: 2px dashed #f59e0b; background: rgba(245,158,11,.13); pointer-events: none; }
 .splitBox.draft { border-color: #111827; }
 .selectionBox { position: absolute; border: 2px solid #2563eb; background: rgba(37,99,235,.14); pointer-events: none; }
+.busyOverlay { position: absolute; inset: 0; z-index: 1200; display: grid; place-content: center; justify-items: center; gap: 8px; padding: 24px; text-align: center; color: #fff; background: rgba(15,23,42,.46); backdrop-filter: blur(2px); cursor: wait; }
+.busyOverlay strong { font-size: 16px; }
+.busyOverlay span:last-child { max-width: 320px; color: rgba(255,255,255,.78); font-size: 13px; line-height: 1.4; }
+.loadingSpinner { width: 34px; height: 34px; border: 3px solid rgba(255,255,255,.28); border-top-color: #fff; border-radius: 999px; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .explodedGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; align-items: start; }
 .componentCard { display: grid; gap: 8px; min-width: 0; padding: 8px; text-align: left; color: #111827; background: #fff; border: 1px solid #cbd5e1; border-radius: 6px; cursor: pointer; }
 .componentCard:hover { border-color: #2563eb; background: #f8fafc; }

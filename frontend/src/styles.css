@@ -186,6 +186,7 @@ input {
 }
 
 .canvasPane {
+  position: relative;
   padding: 18px;
   overflow: auto;
 }
@@ -334,6 +335,48 @@ input {
 
 .splitBox.draft {
   border-color: #111827;
+}
+
+.busyOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  padding: 24px;
+  text-align: center;
+  color: #ffffff;
+  background: rgba(15, 23, 42, 0.46);
+  backdrop-filter: blur(2px);
+  cursor: wait;
+}
+
+.busyOverlay strong {
+  font-size: 16px;
+}
+
+.busyOverlay span:last-child {
+  max-width: 320px;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.loadingSpinner {
+  width: 34px;
+  height: 34px;
+  border: 3px solid rgba(255, 255, 255, 0.28);
+  border-top-color: #ffffff;
+  border-radius: 999px;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .explodedGrid {

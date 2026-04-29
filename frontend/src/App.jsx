@@ -41,6 +41,8 @@ const uiText = {
     waiting: '대기 중',
     visibleCount: (count) => `${count}개 표시 컴포넌트`,
     selectedCount: (count) => `${count}개 선택됨`,
+    analyzingTitle: '컴포넌트를 분석하는 중입니다',
+    analyzingHelp: '이미지 크기와 AI 런타임에 따라 시간이 걸릴 수 있습니다.',
     emptyTitle: '이미지를 업로드하세요',
     emptyHelp: '분석 후 컴포넌트를 선택해 병합, 분리, 제외할 수 있습니다.',
     componentList: '컴포넌트',
@@ -61,6 +63,8 @@ const uiText = {
     waiting: 'Waiting',
     visibleCount: (count) => `${count} visible components`,
     selectedCount: (count) => `${count} selected`,
+    analyzingTitle: 'Analyzing components...',
+    analyzingHelp: 'This can take a moment depending on image size and AI runtime.',
     emptyTitle: 'Upload an image',
     emptyHelp: 'After analysis, select components to merge, split, or exclude.',
     componentList: 'Components',
@@ -73,6 +77,7 @@ export function App() {
   const [project, setProject] = useState(null);
   const [selected, setSelected] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [busyMode, setBusyMode] = useState(null);
   const [message, setMessage] = useState('');
   const [splitMode, setSplitMode] = useState(false);
   const [splitBoxes, setSplitBoxes] = useState([]);
@@ -122,7 +127,7 @@ export function App() {
       setProject(nextProject);
       setSelected([]);
       setMessage(t.analyzeComplete(nextProject.components.length, nextProject.analysis_notes?.length ?? 0));
-    });
+    }, 'analyze');
   }
 
   async function handleMerge() {
@@ -167,15 +172,20 @@ export function App() {
     });
   }
 
-  async function runBusy(callback) {
+  async function runBusy(callback, mode = 'work') {
     setBusy(true);
+    setBusyMode(mode);
     setMessage('');
     try {
+      if (mode === 'analyze') {
+        await waitForNextPaint();
+      }
       await callback();
     } catch (error) {
       setMessage(error.message);
     } finally {
       setBusy(false);
+      setBusyMode(null);
     }
   }
 
@@ -222,6 +232,7 @@ export function App() {
   }
 
   const imageUrl = project ? `/api/projects/${project.id}/image` : null;
+  const showBusyOverlay = busyMode === 'analyze';
 
   return (
     <main className="appShell">
@@ -393,9 +404,20 @@ export function App() {
               )}
             </div>
           )}
+          {showBusyOverlay && <BusyOverlay title={t.analyzingTitle} help={t.analyzingHelp} />}
         </section>
       </section>
     </main>
+  );
+}
+
+function BusyOverlay({ title, help }) {
+  return (
+    <div className="busyOverlay" role="status" aria-live="polite">
+      <span className="loadingSpinner" aria-hidden="true" />
+      <strong>{title}</strong>
+      <span>{help}</span>
+    </div>
   );
 }
 
@@ -522,4 +544,10 @@ function roundBox(box) {
     width: Math.round(box.width),
     height: Math.round(box.height),
   };
+}
+
+function waitForNextPaint() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  });
 }

@@ -43,6 +43,8 @@ const uiText = {
     waiting: '대기 중',
     visibleCount: (count) => `${count}개 표시 컴포넌트`,
     selectedCount: (count) => `${count}개 선택됨`,
+    analyzingTitle: '컴포넌트를 분석하는 중입니다',
+    analyzingHelp: '이미지 크기와 AI 런타임에 따라 시간이 걸릴 수 있습니다.',
     emptyTitle: '이미지를 업로드하세요',
     emptyHelp: '분석 후 컴포넌트를 병합, 분리, 제외할 수 있습니다.',
   },
@@ -62,6 +64,8 @@ const uiText = {
     waiting: 'Waiting',
     visibleCount: (count) => `${count} visible components`,
     selectedCount: (count) => `${count} selected`,
+    analyzingTitle: 'Analyzing components...',
+    analyzingHelp: 'This can take a moment depending on image size and AI runtime.',
     emptyTitle: 'Upload an image',
     emptyHelp: 'After analysis, select components to merge, split, or exclude.',
   },
@@ -73,6 +77,7 @@ function App() {
   const [project, setProject] = useState(null);
   const [selected, setSelected] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [busyMode, setBusyMode] = useState(null);
   const [message, setMessage] = useState('');
   const [splitMode, setSplitMode] = useState(false);
   const [splitBoxes, setSplitBoxes] = useState([]);
@@ -95,15 +100,20 @@ function App() {
   const orderedVisible = useMemo(() => [...visible].sort(componentDrawOrder), [visible]);
   const inspectionVisible = useMemo(() => [...visible].sort(componentInspectionOrder), [visible]);
 
-  async function busyRun(callback) {
+  async function busyRun(callback, mode = 'work') {
     setBusy(true);
+    setBusyMode(mode);
     setMessage('');
     try {
+      if (mode === 'analyze') {
+        await waitForNextPaint();
+      }
       await callback();
     } catch (error) {
       setMessage(error.message);
     } finally {
       setBusy(false);
+      setBusyMode(null);
     }
   }
 
@@ -130,7 +140,7 @@ function App() {
       setSelected([]);
       setSelectionDraft(null);
       setMessage(t.analyzeComplete(next.components.length, next.analysis_notes?.length ?? 0));
-    });
+    }, 'analyze');
   }
 
   async function patch(payload) {
@@ -255,6 +265,7 @@ function App() {
   const samReady = runtime?.sam3?.ready;
   const ocrReady = runtime?.paddleocr?.ready;
   const runtimeIssues = runtime?.issues ?? [];
+  const showBusyOverlay = busyMode === 'analyze';
 
   return h('main', { className: 'appShell' }, [
     h('header', { className: 'topbar', key: 'topbar' }, [
@@ -319,8 +330,8 @@ function App() {
           ]),
         )),
       ]),
-      h('section', { className: 'canvasPane', key: 'canvas' }, project
-        ? h('div', { className: 'canvasStack' }, [
+      h('section', { className: 'canvasPane', key: 'canvas' }, [
+        project ? h('div', { className: 'canvasStack', key: 'canvas-stack' }, [
           h('div', { className: 'viewToolbar', key: 'toolbar' }, [
             h('div', { className: 'segmented', role: 'group', 'aria-label': 'component view mode', key: 'modes' }, [
               h('button', {
@@ -366,15 +377,25 @@ function App() {
             draft ? h('div', { key: 'draft', className: 'splitBox draft', style: boxStyle(draft, project) }) : null,
             selectionDraft ? h('div', { key: 'selection', className: 'selectionBox', style: boxStyle(selectionDraft, project) }) : null,
           ])) : h('div', { className: 'explodedGrid', key: 'exploded-view' }, inspectionVisible.map((component) =>
-            componentCard(component, project, selected.includes(component.id), toggle),
-          )),
+              componentCard(component, project, selected.includes(component.id), toggle),
+            )),
         ])
         : h('div', { className: 'emptyState' }, [
             h(Layers, { size: 42, key: 'icon' }),
             h('strong', { key: 'strong' }, t.emptyTitle),
             h('span', { key: 'span' }, t.emptyHelp),
-          ])),
+          ]),
+        showBusyOverlay ? busyOverlay(t) : null,
+      ]),
     ]),
+  ]);
+}
+
+function busyOverlay(t) {
+  return h('div', { className: 'busyOverlay', role: 'status', 'aria-live': 'polite', key: 'busy-overlay' }, [
+    h('span', { className: 'loadingSpinner', 'aria-hidden': true, key: 'spinner' }),
+    h('strong', { key: 'title' }, t.analyzingTitle),
+    h('span', { key: 'help' }, t.analyzingHelp),
   ]);
 }
 
@@ -504,6 +525,12 @@ function intersects(left, right) {
     || left.y + left.height < right.y
     || right.y + right.height < left.y
   );
+}
+
+function waitForNextPaint() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  });
 }
 
 createRoot(document.getElementById('root')).render(h(App));
